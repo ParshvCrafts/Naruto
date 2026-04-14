@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Naruto Jutsu</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Camera + main canvas stack -->
+    <div class="canvas-wrap">
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas"></canvas>        <!-- main effects canvas -->
+      <canvas id="hud-canvas"></canvas>    <!-- HUD overlay (separate z-layer) -->
+    </div>
+
+    <!-- Controls outside the recording area -->
+    <div class="controls">
+      <button id="btn-record" class="ctrl-btn">⏺ Record</button>
+      <label class="ctrl-label">Chakra:
+        <select id="chakra-select" class="ctrl-select">
+          <option value="#00BFFF">Blue (default)</option>
+          <option value="#FF3333">Red (Nine-Tails)</option>
+          <option value="#9B59B6">Purple (Rinnegan)</option>
+          <option value="#2ECC71">Green (Medical)</option>
+          <option value="#F1C40F">Gold</option>
+        </select>
+      </label>
+      <span id="model-status" class="status-text">Loading model…</span>
+    </div>
+  </div>
+
+  <!-- CDN libraries (globals: Holistic, SelfieSegmentation, Camera, tf) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js"></script>
+
+  <!-- Main app (ES6 module) -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>
