@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Naruto Jutsu — Trainer</title>
+  <link rel="stylesheet" href="trainer.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Hand Sign Trainer</h1>
+    <p class="subtitle">Collect samples for all 14 signs, then train and export your model.</p>
+
+    <!-- Camera -->
+    <div class="video-wrap">
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas"></canvas>
+      <div id="rec-badge" class="rec-badge hidden">● REC</div>
+      <div id="countdown" class="countdown hidden"></div>
+      <button id="btn-rec" class="rec-overlay-btn">R &nbsp; Record Sign</button>
+    </div>
+
+    <!-- Step 1: Sign selection -->
+    <section class="section">
+      <h2>1. Select Sign & Record</h2>
+      <!-- Reference panel — shows selected sign image + cue -->
+      <div id="sign-ref" class="sign-ref">
+        <div class="sign-ref-placeholder">
+          <span>← Select a sign below to see the reference</span>
+        </div>
+        <div class="sign-ref-content hidden">
+          <img id="sign-ref-img" src="" alt="">
+          <div class="sign-ref-info">
+            <div class="sign-ref-name" id="sign-ref-name"></div>
+            <div class="sign-ref-label" id="sign-ref-label"></div>
+            <div class="sign-ref-hint">Form this hand shape, then click <strong>Record Sign</strong></div>
+          </div>
+        </div>
+      </div>
+      <div id="sign-grid" class="sign-grid">
+        <!-- Populated by trainer.js -->
+      </div>
+    </section>
+
+    <!-- Step 2: Train -->
+    <section class="section">
+      <h2>2. Train Model</h2>
+      <p id="train-status" class="status">Collect ≥60 samples per class, then train.</p>
+      <div class="conf-bar-wrap">
+        <div class="conf-bar"><div id="conf-fill" class="conf-fill"></div></div>
+        <span id="conf-label">0%</span>
+      </div>
+      <button id="btn-train" class="btn-primary" disabled>Train Model (100 epochs)</button>
+    </section>
+
+    <!-- Step 3: Export -->
+    <section class="section">
+      <h2>3. Save Model</h2>
+      <div class="btn-row">
+        <button id="btn-save-model" class="btn-primary" disabled>Save Model</button>
+        <button id="btn-export-data" class="btn-secondary">Export Data (.json)</button>
+        <button id="btn-import-data" class="btn-secondary">Import Data</button>
+        <button id="btn-clear" class="btn-danger">Clear All</button>
+      </div>
+      <input type="file" id="import-input" accept=".json" hidden>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+  <script src="trainer.js"></script>
+</body>
+</html>
