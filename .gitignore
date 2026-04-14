@@ -1,0 +1,21 @@
+# Internal planning & AI tooling docs — not part of the project
+docs/
+
+# Dependencies & build artefacts
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Python virtualenv (if accidentally placed here)
+myenv/
+venv/
+env/
