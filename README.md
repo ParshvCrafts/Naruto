@@ -333,8 +333,6 @@ Individual sign images are stored in `assets/signs/` and used throughout the tra
 
 ## Development Notes
 
-All implementation details, module APIs, known gotchas, and architectural decisions are documented in [`docs/CLAUDE.md`](docs/CLAUDE.md). The full implementation plan (Sessions 1–6) lives in [`docs/superpowers/plans/`](docs/superpowers/plans/).
-
 ```bash
 # Run with hot reload (requires browser-sync or similar)
 npx browser-sync start --server --files "**/*.{html,css,js}"
