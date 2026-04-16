@@ -122,7 +122,7 @@ function extract(right, left) {
 
 /** Returns true if this frame is suitable for collection.
  *  Signs 0-12 require both hands detected.
- *  None (13) accepts any frame � user may have hands off-screen intentionally. */
+ *  None (13) accepts any frame � user may have hands off-screen intentionally. */
 function shouldCollect(classId, results) {
   if (classId === 13) return true;
   return !!(results.rightHandLandmarks && results.leftHandLandmarks);
@@ -296,17 +296,23 @@ async function trainModel() {
   const fillEl   = document.getElementById('conf-fill');
   const labelEl  = document.getElementById('conf-label');
 
-  statusEl.textContent = 'Preparing data…';
+  statusEl.textContent = 'Preparing data (3× augmentation)…';
   document.getElementById('btn-train').disabled = true;
 
   // Build feature matrix (xs) and one-hot labels (ys)
   const allX = [], allY = [];
   SIGNS.forEach(s => {
+    const label = new Array(14).fill(0);
+    label[s.id] = 1;
     samples[s.id].forEach(vec => {
+      // Original sample
       allX.push(vec);
-      const label = new Array(14).fill(0);
-      label[s.id] = 1;
-      allY.push(label);
+      allY.push(label.slice());
+      // 3 augmented copies with ±2% random landmark jitter
+      for (let a = 0; a < 3; a++) {
+        allX.push(vec.map(v => v + (Math.random() * 0.04 - 0.02)));
+        allY.push(label.slice());
+      }
     });
   });
 
