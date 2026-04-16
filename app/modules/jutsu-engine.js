@@ -9,7 +9,7 @@ export default class JutsuEngine {
     this._SHADOW_CLONE_CLASS = 12;
     this._NONE_CLASS         = 13;
     this._CONFIRM_THRESHOLD  = 0.70;
-    this._CONF_MIN           = 0.85;
+    this._CONF_MIN           = 0.90;  // minimum per-frame confidence to accept a prediction
 
     // Sequence jutsu support
     this._sequences   = {};     // jutsuName → { sequence: int[], timeoutMs: number }

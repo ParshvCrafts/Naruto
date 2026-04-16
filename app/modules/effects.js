@@ -142,6 +142,10 @@ export default class Effects {
   }
 
   _extractPerson(videoEl, segMask, w, h) {
+    // NOTE on coordinate space: _personCanvas is drawn in raw (unmirrored) space.
+    // In render(), ctx.drawImage(person, 0, 0) is called inside the ctx.save()/scale(-1,1) block,
+    // which mirrors it a second time — resulting in a correctly-mirrored person layer.
+    // If you ever add a mirror transform to pctx here, the person layer in render() will break.
     if (!this._personCanvas) {
       this._personCanvas = document.createElement('canvas');
     }

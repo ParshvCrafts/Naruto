@@ -1,5 +1,8 @@
 // trainer.js — Naruto Jutsu Trainer
-// CDN globals available: Holistic, Camera, tf
+// CDN globals available: Holistic, Camera, tf, drawConnectors, drawLandmarks, HAND_CONNECTIONS
+// HAND_CONNECTIONS is exported by the @mediapipe/holistic CDN bundle as window.HAND_CONNECTIONS.
+// Defensive fallback ensures no crash if the CDN version changes.
+const HAND_CONNECTIONS_SAFE = (typeof HAND_CONNECTIONS !== 'undefined') ? HAND_CONNECTIONS : [];
 
 // --- IndexedDB persistence ---
 const DB_NAME  = 'naruto-trainer-v1';
@@ -197,7 +200,7 @@ function onResults(results) {
 
   // Draw landmarks on top (also mirrored via the active transform)
   if (results.rightHandLandmarks) {
-    drawConnectors(ctx, results.rightHandLandmarks, HAND_CONNECTIONS,
+    drawConnectors(ctx, results.rightHandLandmarks, HAND_CONNECTIONS_SAFE,
       { color: '#00ff88', lineWidth: 2 });
     drawLandmarks(ctx, results.rightHandLandmarks,
       { color: '#00ff88', fillColor: '#00ff8866', radius: 3 });
@@ -299,6 +302,9 @@ async function trainModel() {
   document.getElementById('btn-train').disabled = true;
   const isFineTune = document.querySelector('input[name="train-mode"]:checked').value === 'finetune';
   if (isFineTune) {
+    // Fine-tune = train new BatchNorm model on ALL currently loaded samples (old + new combined).
+    // Old samples should be imported via "Import Data" before clicking Train.
+    // Note: new architecture (BatchNorm) is incompatible with old model weights — data union only.
     statusEl.textContent = 'Fine-tune mode: training on all combined samples…';
   } else {
     statusEl.textContent = 'Train new model: preparing data (3× augmentation)…';
@@ -329,6 +335,7 @@ async function trainModel() {
   const xs = tf.tensor2d(xShuf);
   const ys = tf.tensor2d(yShuf);
 
+  if (model) model.dispose();  // free GPU memory before building a new model
   model = buildModel();
   statusEl.textContent = 'Training…';
 
