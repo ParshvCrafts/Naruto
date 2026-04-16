@@ -83,61 +83,61 @@ export default class HUD {
     ctx.textBaseline = 'alphabetic';
 
     // Background pill — wider when image is present
-    const pillW = hasImg ? 268 : 220;
+    const pillW = hasImg ? 310 : 260;
     ctx.fillStyle = 'rgba(0,0,0,0.62)';
-    roundRect(ctx, 10, 8, pillW, 56, 8);
+    roundRect(ctx, 10, 6, pillW, 70, 8);
     ctx.fill();
 
     if (hasImg) {
-      // Sign thumbnail (44×44, clipped to pill interior)
+      // Sign thumbnail (56×56, clipped to pill interior)
       ctx.save();
-      roundRect(ctx, 14, 12, 44, 44, 5);
+      roundRect(ctx, 14, 11, 56, 56, 5);
       ctx.clip();
-      ctx.drawImage(img, 14, 12, 44, 44);
+      ctx.drawImage(img, 14, 11, 56, 56);
       ctx.restore();
 
-      // Thin orange border around thumbnail
+      // Thin chakra-colored border around thumbnail
       ctx.strokeStyle = this._chakraColor;
       ctx.lineWidth   = 1.5;
-      roundRect(ctx, 14, 12, 44, 44, 5);
+      roundRect(ctx, 14, 11, 56, 56, 5);
       ctx.stroke();
 
       // Sign name — offset right of image
-      ctx.font      = 'bold 14px monospace';
+      ctx.font      = 'bold 16px monospace';
       ctx.fillStyle = this._chakraColor;
-      ctx.fillText(name, 64, 28);
+      ctx.fillText(name, 78, 34);
 
       // Confidence bar background
       ctx.fillStyle = '#333';
-      roundRect(ctx, 64, 36, 178, 8, 4);
+      roundRect(ctx, 78, 46, 196, 10, 4);
       ctx.fill();
 
       // Confidence bar fill
       ctx.fillStyle = `hsl(${confidence * 40}, 100%, 55%)`;
-      roundRect(ctx, 64, 36, Math.round(178 * confidence), 8, 4);
+      roundRect(ctx, 78, 46, Math.round(196 * confidence), 10, 4);
       ctx.fill();
 
       // Percentage
-      ctx.font      = '11px monospace';
+      ctx.font      = '12px monospace';
       ctx.fillStyle = '#ccc';
-      ctx.fillText(`${pct}%`, 248, 44);
+      ctx.fillText(`${pct}%`, 280, 58);
     } else {
-      // No image — original text-only layout
-      ctx.font      = 'bold 16px monospace';
+      // No image — text-only layout
+      ctx.font      = 'bold 18px monospace';
       ctx.fillStyle = this._chakraColor;
-      ctx.fillText(name, 20, 32);
+      ctx.fillText(name, 20, 36);
 
       ctx.fillStyle = '#333';
-      roundRect(ctx, 20, 38, 180, 8, 4);
+      roundRect(ctx, 20, 50, 210, 10, 4);
       ctx.fill();
 
       ctx.fillStyle = `hsl(${confidence * 40}, 100%, 55%)`;
-      roundRect(ctx, 20, 38, Math.round(180 * confidence), 8, 4);
+      roundRect(ctx, 20, 50, Math.round(210 * confidence), 10, 4);
       ctx.fill();
 
       ctx.font      = '12px monospace';
       ctx.fillStyle = '#ccc';
-      ctx.fillText(`${pct}%`, 206, 46);
+      ctx.fillText(`${pct}%`, 236, 62);
     }
 
     ctx.restore();
