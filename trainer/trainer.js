@@ -173,16 +173,39 @@ const camera = new Camera(video, {
 camera.start().then(() => console.log('[trainer] camera started'));
 
 function onResults(results) {
-  canvas.width  = video.videoWidth;
-  canvas.height = video.videoHeight;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const vw = video.videoWidth, vh = video.videoHeight;
+  canvas.width  = vw;
+  canvas.height = vh;
   lastResults = results;
 
+  // Draw mirrored video frame (selfie orientation — matches app display)
+  // Sample collection below uses raw landmark coords — canvas draw is cosmetic only
+  ctx.save();
+  ctx.translate(vw, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, vw, vh);
+
+  // Draw landmarks on top (also mirrored via the active transform)
+  if (results.rightHandLandmarks) {
+    drawConnectors(ctx, results.rightHandLandmarks, HAND_CONNECTIONS,
+      { color: '#00ff88', lineWidth: 2 });
+    drawLandmarks(ctx, results.rightHandLandmarks,
+      { color: '#00ff88', fillColor: '#00ff8866', radius: 3 });
+  }
+  if (results.leftHandLandmarks) {
+    drawConnectors(ctx, results.leftHandLandmarks, HAND_CONNECTIONS,
+      { color: '#ff8800', lineWidth: 2 });
+    drawLandmarks(ctx, results.leftHandLandmarks,
+      { color: '#ff8800', fillColor: '#ff880066', radius: 3 });
+  }
+  ctx.restore();
+
+  // Sample collection — uses raw landmark coords (not flipped)
+  // NOTE: using the original OR condition here; Task 8.2 replaces it with shouldCollect()
   if (isRecording && selectedSign !== null &&
       (results.rightHandLandmarks || results.leftHandLandmarks)) {
     const vec = extract(results.rightHandLandmarks, results.leftHandLandmarks);
     samples[selectedSign].push(vec);
-    // Update count every 10 frames to avoid layout thrashing
     if (samples[selectedSign].length % 10 === 0) updateAllCounts();
   }
 }

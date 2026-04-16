@@ -23,7 +23,6 @@ h2 { font-size: 1.1rem; color: #ccc; margin-bottom: 12px; }
 video, #canvas {
   position: absolute; top: 0; left: 0;
   width: 100%; height: 100%;
-  transform: scaleX(-1);
 }
 #canvas { z-index: 2; }
 .rec-badge {
