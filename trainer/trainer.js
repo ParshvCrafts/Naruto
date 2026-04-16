@@ -1,5 +1,8 @@
 // trainer.js — Naruto Jutsu Trainer
-// CDN globals available: Holistic, Camera, tf
+// CDN globals available: Holistic, Camera, tf, drawConnectors, drawLandmarks, HAND_CONNECTIONS
+// HAND_CONNECTIONS is exported by the @mediapipe/holistic CDN bundle as window.HAND_CONNECTIONS.
+// Defensive fallback ensures no crash if the CDN version changes.
+const HAND_CONNECTIONS_SAFE = (typeof HAND_CONNECTIONS !== 'undefined') ? HAND_CONNECTIONS : [];
 
 // --- IndexedDB persistence ---
 const DB_NAME  = 'naruto-trainer-v1';
@@ -64,6 +67,8 @@ const SIGNS = [
   { id: 13, name: 'None',    label: 'Neutral',      img: null               },
 ];
 
+const MIN_SAMPLES = 150;  // minimum samples per class before training unlocks
+
 const video  = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
@@ -85,13 +90,13 @@ function updateAllCounts() {
     const el   = document.getElementById(`count-${s.id}`);
     const card = document.querySelector(`.sign-card[data-id="${s.id}"]`);
     if (el)   el.textContent = samples[s.id].length;
-    if (card) card.classList.toggle('ready', samples[s.id].length >= 60);
+    if (card) card.classList.toggle('ready', samples[s.id].length >= MIN_SAMPLES);
   });
   checkTrainable();
 }
 
 function checkTrainable() {
-  const allReady = SIGNS.every(s => samples[s.id].length >= 60);
+  const allReady = SIGNS.every(s => samples[s.id].length >= MIN_SAMPLES);
   document.getElementById('btn-train').disabled = !allReady;
 }
 
@@ -116,6 +121,14 @@ function extract(right, left) {
   vec.set(normalize(right),  0);
   vec.set(normalize(left),  63);
   return Array.from(vec);
+}
+
+/** Returns true if this frame is suitable for collection.
+ *  Signs 0-12 require both hands detected.
+ *  None (13) accepts any frame � user may have hands off-screen intentionally. */
+function shouldCollect(classId, results) {
+  if (classId === 13) return true;
+  return !!(results.rightHandLandmarks && results.leftHandLandmarks);
 }
 
 // --- Recording state ---
@@ -173,17 +186,41 @@ const camera = new Camera(video, {
 camera.start().then(() => console.log('[trainer] camera started'));
 
 function onResults(results) {
-  canvas.width  = video.videoWidth;
-  canvas.height = video.videoHeight;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const vw = video.videoWidth, vh = video.videoHeight;
+  canvas.width  = vw;
+  canvas.height = vh;
   lastResults = results;
 
-  if (isRecording && selectedSign !== null &&
-      (results.rightHandLandmarks || results.leftHandLandmarks)) {
-    const vec = extract(results.rightHandLandmarks, results.leftHandLandmarks);
-    samples[selectedSign].push(vec);
-    // Update count every 10 frames to avoid layout thrashing
-    if (samples[selectedSign].length % 10 === 0) updateAllCounts();
+  // Draw mirrored video frame (selfie orientation — matches app display)
+  // Sample collection below uses raw landmark coords — canvas draw is cosmetic only
+  ctx.save();
+  ctx.translate(vw, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, vw, vh);
+
+  // Draw landmarks on top (also mirrored via the active transform)
+  if (results.rightHandLandmarks) {
+    drawConnectors(ctx, results.rightHandLandmarks, HAND_CONNECTIONS_SAFE,
+      { color: '#00ff88', lineWidth: 2 });
+    drawLandmarks(ctx, results.rightHandLandmarks,
+      { color: '#00ff88', fillColor: '#00ff8866', radius: 3 });
+  }
+  if (results.leftHandLandmarks) {
+    drawConnectors(ctx, results.leftHandLandmarks, HAND_CONNECTIONS,
+      { color: '#ff8800', lineWidth: 2 });
+    drawLandmarks(ctx, results.leftHandLandmarks,
+      { color: '#ff8800', fillColor: '#ff880066', radius: 3 });
+  }
+  ctx.restore();
+
+  // Sample collection — uses raw landmark coords (not flipped)
+  // NOTE: using the original OR condition here; Task 8.2 replaces it with shouldCollect()
+  if (isRecording && selectedSign !== null) {
+    if (shouldCollect(selectedSign, results)) {
+      const vec = extract(results.rightHandLandmarks, results.leftHandLandmarks);
+      samples[selectedSign].push(vec);
+      if (samples[selectedSign].length % 10 === 0) updateAllCounts();
+    }
   }
 }
 
@@ -228,7 +265,7 @@ function selectSign(id) {
     // Neutral — no reference image
     refImg.src  = '';
     refName.textContent  = `${sign.name} — ${sign.label}`;
-    refLabel.textContent = `Class ID ${sign.id}  ·  Rest your hands naturally at your sides`;
+    refLabel.textContent = `Class ID ${sign.id}  ·  Target: 300+ samples. Record 4 takes: hands at sides, one hand only, casual gestures, hands partially off-screen.`;
     refPlaceholder.classList.add('hidden');
     refContent.classList.remove('hidden');
   }
@@ -242,8 +279,10 @@ let model = null;
 function buildModel() {
   const m = tf.sequential();
   m.add(tf.layers.dense({ inputShape: [126], units: 128, activation: 'relu' }));
+  m.add(tf.layers.batchNormalization());
   m.add(tf.layers.dropout({ rate: 0.3 }));
   m.add(tf.layers.dense({ units: 64, activation: 'relu' }));
+  m.add(tf.layers.batchNormalization());
   m.add(tf.layers.dropout({ rate: 0.2 }));
   m.add(tf.layers.dense({ units: 32, activation: 'relu' }));
   m.add(tf.layers.dense({ units: 14, activation: 'softmax' }));
@@ -260,8 +299,16 @@ async function trainModel() {
   const fillEl   = document.getElementById('conf-fill');
   const labelEl  = document.getElementById('conf-label');
 
-  statusEl.textContent = 'Preparing data (3× augmentation)…';
   document.getElementById('btn-train').disabled = true;
+  const isFineTune = document.querySelector('input[name="train-mode"]:checked').value === 'finetune';
+  if (isFineTune) {
+    // Fine-tune = train new BatchNorm model on ALL currently loaded samples (old + new combined).
+    // Old samples should be imported via "Import Data" before clicking Train.
+    // Note: new architecture (BatchNorm) is incompatible with old model weights — data union only.
+    statusEl.textContent = 'Fine-tune mode: training on all combined samples…';
+  } else {
+    statusEl.textContent = 'Train new model: preparing data (3× augmentation)…';
+  }
 
   // Build feature matrix (xs) and one-hot labels (ys)
   const allX = [], allY = [];
@@ -288,6 +335,7 @@ async function trainModel() {
   const xs = tf.tensor2d(xShuf);
   const ys = tf.tensor2d(yShuf);
 
+  if (model) model.dispose();  // free GPU memory before building a new model
   model = buildModel();
   statusEl.textContent = 'Training…';
 

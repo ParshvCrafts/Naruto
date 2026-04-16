@@ -61,7 +61,7 @@ export default class Effects {
 
     // Sound preloading — empty .mp3 files silently decode to null buffer (no error)
     this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const soundFiles = ['activation', 'clone_pop', 'ambient'];
+    const soundFiles = ['activation', 'clone_pop', 'ambient', 'kage_bunshin_no_jutsu'];
     await Promise.all(soundFiles.map(async name => {
       try {
         const res = await fetch(`${assetsBase}/sounds/${name}.mp3`);
@@ -87,6 +87,13 @@ export default class Effects {
 
     ctx.clearRect(0, 0, w, h);
 
+    // Mirror all layers so the canvas shows selfie orientation.
+    // MediaPipe receives the raw video DOM element — CSS/canvas transforms
+    // are invisible to it. Landmark coords and detection logic are unaffected.
+    ctx.save();
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+
     // Layer 1: raw webcam frame
     ctx.drawImage(videoEl, 0, 0, w, h);
 
@@ -111,6 +118,8 @@ export default class Effects {
       ctx.fillRect(0, 0, w, h);
       this._flashOpacity = Math.max(0, this._flashOpacity - 0.05);
     }
+
+    ctx.restore();  // remove mirror transform
   }
 
   triggerClones() {
@@ -124,7 +133,7 @@ export default class Effects {
     this._cloneStartTime = performance.now();
     this._flashOpacity   = 0.8;
     this._chakraActive   = true;
-    this._playSound('activation', 0.8);
+    this._playSoundChained('activation', 'kage_bunshin_no_jutsu', 0.8, 0.9);
     this._CLONE_DEFS.forEach(def => {
       const id = setTimeout(() => this._playSound('clone_pop', 0.3), def.delay);
       this._cloneTimeouts.push(id);
@@ -133,6 +142,10 @@ export default class Effects {
   }
 
   _extractPerson(videoEl, segMask, w, h) {
+    // NOTE on coordinate space: _personCanvas is drawn in raw (unmirrored) space.
+    // In render(), ctx.drawImage(person, 0, 0) is called inside the ctx.save()/scale(-1,1) block,
+    // which mirrors it a second time — resulting in a correctly-mirrored person layer.
+    // If you ever add a mirror transform to pctx here, the person layer in render() will break.
     if (!this._personCanvas) {
       this._personCanvas = document.createElement('canvas');
     }
@@ -257,6 +270,36 @@ export default class Effects {
     src.connect(gain);
     gain.connect(this._audioCtx.destination);
     src.start();
+  }
+
+  /** Play name1 immediately, then schedule name2 to start exactly when name1 ends.
+   *  If name2 failed to load (null buffer), falls back to playing name1 alone. */
+  _playSoundChained(name1, name2, vol1, vol2) {
+    const buf1 = this._sounds[name1];
+    const buf2 = this._sounds[name2];
+    if (!buf1 || !this._audioCtx) return;
+    if (this._audioCtx.state === 'suspended') this._audioCtx.resume();
+
+    // If name2 is unavailable, play name1 alone and exit
+    if (!buf2) { this._playSound(name1, vol1); return; }
+
+    const now = this._audioCtx.currentTime;
+
+    const src1  = this._audioCtx.createBufferSource();
+    const gain1 = this._audioCtx.createGain();
+    gain1.gain.value = vol1;
+    src1.buffer = buf1;
+    src1.connect(gain1);
+    gain1.connect(this._audioCtx.destination);
+    src1.start(now);
+
+    const src2  = this._audioCtx.createBufferSource();
+    const gain2 = this._audioCtx.createGain();
+    gain2.gain.value = vol2;
+    src2.buffer = buf2;
+    src2.connect(gain2);
+    gain2.connect(this._audioCtx.destination);
+    src2.start(now + buf1.duration);  // sample-accurate scheduling
   }
 
   setChakraColor(hex) { this._chakraColor = hex; }
