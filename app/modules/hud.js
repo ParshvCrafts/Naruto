@@ -37,38 +37,15 @@ export default class HUD {
     const ctx = hudCanvas.getContext('2d');
     ctx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
 
-    // Activation splash — centered, drawn first so it appears behind sign display
-    if (this._splash) {
-      const elapsed = performance.now() - this._splash.startTime;
-      let alpha;
-      if      (elapsed < 100)  alpha = elapsed / 100;
-      else if (elapsed < 1100) alpha = 1.0;
-      else if (elapsed < 1600) alpha = 1.0 - (elapsed - 1100) / 500;
-      else { this._splash = null; alpha = 0; }
-
-      if (alpha > 0) {
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.font        = 'bold 48px serif';
-        ctx.fillStyle   = '#ff6b00';
-        ctx.shadowColor = '#ff6b00';
-        ctx.shadowBlur  = 20;
-        ctx.textAlign   = 'center';
-        ctx.fillText(this._splash.text.toUpperCase(), hudCanvas.width / 2, hudCanvas.height / 2);
-        ctx.font       = '20px monospace';
-        ctx.fillStyle  = '#fff';
-        ctx.shadowBlur = 0;
-        ctx.fillText('JUTSU ACTIVATED', hudCanvas.width / 2, hudCanvas.height / 2 + 36);
-        ctx.restore();
-      }
-    }
+    // Activation splash — top-right corner
+    this._drawActivationSplash(ctx, hudCanvas.width);
 
     // Sign display (top-left)
     if (classId !== 13 && classId >= 0 && classId <= 12 && Number.isInteger(classId) && confidence >= 0.5) {
       this._drawSignDisplay(ctx, classId, confidence);
     }
 
-    // Sequence panel (bottom) — shows progress through a multi-sign jutsu sequence
+    // Sequence panel (bottom)
     this._drawSequencePanel(ctx, hudCanvas.width, hudCanvas.height, seqState);
   }
 
@@ -139,6 +116,51 @@ export default class HUD {
       ctx.fillStyle = '#ccc';
       ctx.fillText(`${pct}%`, 236, 62);
     }
+
+    ctx.restore();
+  }
+
+  _drawActivationSplash(ctx, w) {
+    if (!this._splash) return;
+    const elapsed = performance.now() - this._splash.startTime;
+    let alpha;
+    if      (elapsed < 100)  alpha = elapsed / 100;
+    else if (elapsed < 1100) alpha = 1.0;
+    else if (elapsed < 1600) alpha = 1.0 - (elapsed - 1100) / 500;
+    else { this._splash = null; return; }
+
+    const pillW = 220, pillH = 56;
+    const x = w - pillW - 10;
+    const y = 8;
+
+    ctx.save();
+    ctx.globalAlpha  = alpha;
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'alphabetic';
+
+    // Background pill
+    ctx.fillStyle = 'rgba(0,0,0,0.62)';
+    roundRect(ctx, x, y, pillW, pillH, 8);
+    ctx.fill();
+
+    // Orange glow border
+    ctx.strokeStyle = '#ff6b00';
+    ctx.lineWidth   = 1.5;
+    ctx.shadowColor = '#ff6b00';
+    ctx.shadowBlur  = 8;
+    roundRect(ctx, x, y, pillW, pillH, 8);
+    ctx.stroke();
+    ctx.shadowBlur  = 0;
+
+    // Jutsu name
+    ctx.font      = 'bold 13px monospace';
+    ctx.fillStyle = '#ff6b00';
+    ctx.fillText(this._splash.text.toUpperCase(), x + 10, y + 22);
+
+    // "JUTSU ACTIVATED" label
+    ctx.font      = '11px monospace';
+    ctx.fillStyle = '#ccc';
+    ctx.fillText('JUTSU ACTIVATED', x + 10, y + 40);
 
     ctx.restore();
   }
