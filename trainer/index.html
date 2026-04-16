@@ -45,7 +45,21 @@
     <!-- Step 2: Train -->
     <section class="section">
       <h2>2. Train Model</h2>
-      <p id="train-status" class="status">Collect ≥60 samples per class, then train.</p>
+
+      <div class="train-mode-group">
+        <label class="train-mode-option">
+          <input type="radio" name="train-mode" value="new" checked>
+          <span class="train-mode-label">Train New Model</span>
+          <span class="train-mode-hint">Uses only current session data</span>
+        </label>
+        <label class="train-mode-option">
+          <input type="radio" name="train-mode" value="finetune">
+          <span class="train-mode-label">Fine-Tune (Combine Data)</span>
+          <span class="train-mode-hint">Import your old data JSON first, then train on all combined samples</span>
+        </label>
+      </div>
+
+      <p id="train-status" class="status">Collect ≥150 samples per class, then train.</p>
       <div class="conf-bar-wrap">
         <div class="conf-bar"><div id="conf-fill" class="conf-fill"></div></div>
         <span id="conf-label">0%</span>

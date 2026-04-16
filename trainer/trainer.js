@@ -296,8 +296,13 @@ async function trainModel() {
   const fillEl   = document.getElementById('conf-fill');
   const labelEl  = document.getElementById('conf-label');
 
-  statusEl.textContent = 'Preparing data (3× augmentation)…';
   document.getElementById('btn-train').disabled = true;
+  const isFineTune = document.querySelector('input[name="train-mode"]:checked').value === 'finetune';
+  if (isFineTune) {
+    statusEl.textContent = 'Fine-tune mode: training on all combined samples…';
+  } else {
+    statusEl.textContent = 'Train new model: preparing data (3× augmentation)…';
+  }
 
   // Build feature matrix (xs) and one-hot labels (ys)
   const allX = [], allY = [];
