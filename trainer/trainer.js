@@ -64,6 +64,8 @@ const SIGNS = [
   { id: 13, name: 'None',    label: 'Neutral',      img: null               },
 ];
 
+const MIN_SAMPLES = 150;  // minimum samples per class before training unlocks
+
 const video  = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
@@ -85,13 +87,13 @@ function updateAllCounts() {
     const el   = document.getElementById(`count-${s.id}`);
     const card = document.querySelector(`.sign-card[data-id="${s.id}"]`);
     if (el)   el.textContent = samples[s.id].length;
-    if (card) card.classList.toggle('ready', samples[s.id].length >= 60);
+    if (card) card.classList.toggle('ready', samples[s.id].length >= MIN_SAMPLES);
   });
   checkTrainable();
 }
 
 function checkTrainable() {
-  const allReady = SIGNS.every(s => samples[s.id].length >= 60);
+  const allReady = SIGNS.every(s => samples[s.id].length >= MIN_SAMPLES);
   document.getElementById('btn-train').disabled = !allReady;
 }
 
@@ -116,6 +118,14 @@ function extract(right, left) {
   vec.set(normalize(right),  0);
   vec.set(normalize(left),  63);
   return Array.from(vec);
+}
+
+/** Returns true if this frame is suitable for collection.
+ *  Signs 0-12 require both hands detected.
+ *  None (13) accepts any frame — user may have hands off-screen intentionally. */
+function shouldCollect(classId, results) {
+  if (classId === 13) return true;
+  return !!(results.rightHandLandmarks && results.leftHandLandmarks);
 }
 
 // --- Recording state ---
@@ -202,11 +212,12 @@ function onResults(results) {
 
   // Sample collection â€” uses raw landmark coords (not flipped)
   // NOTE: using the original OR condition here; Task 8.2 replaces it with shouldCollect()
-  if (isRecording && selectedSign !== null &&
-      (results.rightHandLandmarks || results.leftHandLandmarks)) {
-    const vec = extract(results.rightHandLandmarks, results.leftHandLandmarks);
-    samples[selectedSign].push(vec);
-    if (samples[selectedSign].length % 10 === 0) updateAllCounts();
+  if (isRecording && selectedSign !== null) {
+    if (shouldCollect(selectedSign, results)) {
+      const vec = extract(results.rightHandLandmarks, results.leftHandLandmarks);
+      samples[selectedSign].push(vec);
+      if (samples[selectedSign].length % 10 === 0) updateAllCounts();
+    }
   }
 }
 
@@ -265,8 +276,10 @@ let model = null;
 function buildModel() {
   const m = tf.sequential();
   m.add(tf.layers.dense({ inputShape: [126], units: 128, activation: 'relu' }));
+  m.add(tf.layers.batchNormalization());
   m.add(tf.layers.dropout({ rate: 0.3 }));
   m.add(tf.layers.dense({ units: 64, activation: 'relu' }));
+  m.add(tf.layers.batchNormalization());
   m.add(tf.layers.dropout({ rate: 0.2 }));
   m.add(tf.layers.dense({ units: 32, activation: 'relu' }));
   m.add(tf.layers.dense({ units: 14, activation: 'softmax' }));
