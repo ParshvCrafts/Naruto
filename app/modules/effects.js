@@ -87,6 +87,13 @@ export default class Effects {
 
     ctx.clearRect(0, 0, w, h);
 
+    // Mirror all layers so the canvas shows selfie orientation.
+    // MediaPipe receives the raw video DOM element — CSS/canvas transforms
+    // are invisible to it. Landmark coords and detection logic are unaffected.
+    ctx.save();
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+
     // Layer 1: raw webcam frame
     ctx.drawImage(videoEl, 0, 0, w, h);
 
@@ -111,6 +118,8 @@ export default class Effects {
       ctx.fillRect(0, 0, w, h);
       this._flashOpacity = Math.max(0, this._flashOpacity - 0.05);
     }
+
+    ctx.restore();  // remove mirror transform
   }
 
   triggerClones() {
