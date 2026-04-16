@@ -262,7 +262,7 @@ function selectSign(id) {
     // Neutral — no reference image
     refImg.src  = '';
     refName.textContent  = `${sign.name} — ${sign.label}`;
-    refLabel.textContent = `Class ID ${sign.id}  ·  Rest your hands naturally at your sides`;
+    refLabel.textContent = `Class ID ${sign.id}  ·  Target: 300+ samples. Record 4 takes: hands at sides, one hand only, casual gestures, hands partially off-screen.`;
     refPlaceholder.classList.add('hidden');
     refContent.classList.remove('hidden');
   }

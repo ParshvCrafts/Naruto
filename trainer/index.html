@@ -23,6 +23,25 @@
     <!-- Step 1: Sign selection -->
     <section class="section">
       <h2>1. Select Sign & Record</h2>
+      <details class="tips-panel">
+        <summary>Recording Tips (read before collecting data)</summary>
+        <div class="tips-content">
+          <p><strong>Setup:</strong> Stand 50–70 cm from camera. Both hands fully visible in frame.</p>
+          <p><strong>During recording:</strong> Slowly drift hands ±5 cm left/right/up/down while holding the sign. This builds position robustness into the model.</p>
+          <ul>
+            <li><strong>Tiger (2):</strong> Both index fingers pointing straight up at the same height.</li>
+            <li><strong>Ram (7):</strong> Left index visibly lower than right index. Pick one convention and stay consistent across all Ram recordings.</li>
+            <li><strong>Serpent (5):</strong> Fingers interlaced, pointing downward.</li>
+            <li><strong>Dragon (4):</strong> Knuckles interlaced, thumbs tucked. Stand slightly farther from camera.</li>
+            <li><strong>None (13):</strong> Record 300+ samples across 3–4 separate takes:
+              <br>Take 1 — Both hands relaxed at sides or on desk
+              <br>Take 2 — One hand only in frame
+              <br>Take 3 — Casual gestures: pointing, waving, typing motion
+              <br>Take 4 — Hands partially out of frame
+            </li>
+          </ul>
+        </div>
+      </details>
       <!-- Reference panel — shows selected sign image + cue -->
       <div id="sign-ref" class="sign-ref">
         <div class="sign-ref-placeholder">
