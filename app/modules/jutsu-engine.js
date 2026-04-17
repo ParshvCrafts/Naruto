@@ -17,6 +17,7 @@ export default class JutsuEngine {
     this._seqLastTime = 0;      // timestamp of last confirmed sign
     this._seqTimeout  = 5000;   // ms before incomplete sequence resets
     this._seqActive   = null;   // jutsuName currently in progress
+    this._character   = null;   // 'naruto' | 'sasuke' | null — gates jutsu activation
   }
 
   onActivation(jutsuName, callback) {
@@ -25,6 +26,11 @@ export default class JutsuEngine {
 
   registerSequence(jutsuName, sequence, timeoutMs = 5000) {
     this._sequences[jutsuName] = { sequence, timeoutMs };
+  }
+
+  /** Gate jutsu to character. null disables all jutsu (selection pending). */
+  setCharacter(character) {
+    this._character = character;
   }
 
   update(classId, confidence) {
@@ -44,11 +50,16 @@ export default class JutsuEngine {
   }
 
   _checkActivation(classId) {
+    if (!this._character) return;  // no character selected — no jutsu
+
     // Shadow Clone — single sign, no sequence
     if (classId === this._SHADOW_CLONE_CLASS) {
-      this._activate('shadowClone');
+      if (this._character === 'naruto') this._activate('shadowClone');
       return;
     }
+
+    // Sequence jutsu — Sasuke only
+    if (this._character !== 'sasuke') return;
 
     // Sequence jutsu — check timeout first (use active sequence's timeout if set)
     const now = performance.now();

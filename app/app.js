@@ -5,8 +5,10 @@ import Detector      from './modules/detector.js';
 import JutsuEngine   from './modules/jutsu-engine.js';
 import Effects       from './modules/effects.js';
 import HUD           from './modules/hud.js';
-import Recorder        from './modules/recorder.js';
-import SignRefinement  from './modules/sign-refinement.js';
+import Recorder          from './modules/recorder.js';
+import SignRefinement    from './modules/sign-refinement.js';
+import GestureClassifier from './modules/gesture-classifier.js';
+import CharacterSelect   from './modules/character-select.js';
 
 const video       = document.getElementById('video');
 const canvas      = document.getElementById('canvas');
@@ -19,6 +21,9 @@ const fx       = new Effects();
 const hud      = new HUD();
 const recorder   = new Recorder();
 const refinement = new SignRefinement();
+const gc         = new GestureClassifier();
+const cs         = new CharacterSelect();
+let selectedCharacter = null;
 
 async function init() {
   // Load trained model
@@ -32,6 +37,19 @@ async function init() {
 
   // Preload smoke images + sounds
   await fx.preload('../assets');
+  cs.loadCards('../assets/characters');
+
+  // Sync persisted character to engine + theme on page load
+  const saved = cs.getSelectedCharacter();
+  if (saved) {
+    selectedCharacter = saved;
+    engine.setCharacter(saved);
+    const initColor = saved === 'sasuke' ? '#9C27B0' : '#ff6b00';
+    fx.setChakraColor(initColor);
+    hud.setChakraColor(initColor);
+    const chakraSelectEl = document.getElementById('chakra-select');
+    if (chakraSelectEl) chakraSelectEl.value = initColor;
+  }
 
   // Chakra color picker — restore saved preference, update fx+hud on change
   const chakraSelect = document.getElementById('chakra-select');
@@ -40,6 +58,7 @@ async function init() {
   fx.setChakraColor(chakraSelect.value);
   hud.setChakraColor(chakraSelect.value);
   chakraSelect.addEventListener('change', () => {
+    if (selectedCharacter) return;  // character theme takes precedence over manual picker
     const color = chakraSelect.value;
     fx.setChakraColor(color);
     hud.setChakraColor(color);
@@ -86,23 +105,46 @@ async function init() {
       hudCanvas.width = vw; hudCanvas.height = vh;
     }
 
-    // Fire-and-forget: updates latestMask asynchronously (may lag 1 frame — acceptable)
+    // Fire-and-forget selfie segmentation (1-frame lag acceptable)
     if (!segPending) {
       segPending = true;
       segmentation.send({ image: video });
     }
 
-    let { classId, confidence } = detector.predict(
-      results.rightHandLandmarks, results.leftHandLandmarks
-    );
-    ({ classId, confidence } = refinement.refine(
-      classId, confidence,
-      results.rightHandLandmarks, results.leftHandLandmarks
-    ));
+    // ── Gesture classification (runs every frame, independent of MLP) ──────────────
+    const gesture = gc.detect(results.rightHandLandmarks, results.leftHandLandmarks);
+    cs.update(gesture);
+
+    // ── Character sync (engine + theme) ───────────────────────────────────────────
+    const newChar = cs.getSelectedCharacter();
+    if (newChar !== selectedCharacter) {
+      selectedCharacter = newChar;
+      engine.setCharacter(newChar);
+      if (newChar) {
+        const color = newChar === 'sasuke' ? '#9C27B0' : '#ff6b00';
+        fx.setChakraColor(color);
+        hud.setChakraColor(color);
+        localStorage.setItem('chakraColor', color);
+      }
+    }
+
+    // ── MLP detection (skipped while carousel is open) ────────────────────────────
+    let classId = 13, confidence = 0;
+    if (!cs.isActive()) {
+      ({ classId, confidence } = detector.predict(
+        results.rightHandLandmarks, results.leftHandLandmarks
+      ));
+      ({ classId, confidence } = refinement.refine(
+        classId, confidence,
+        results.rightHandLandmarks, results.leftHandLandmarks
+      ));
+    }
     engine.update(classId, confidence);
 
+    // ── Rendering ─────────────────────────────────────────────────────────────────
     fx.render(video, latestMask, { canvas, jutsuActive: engine.isActive() });
     hud.update(hudCanvas, classId, confidence, engine.getSequenceState());
+    cs.render(hudCanvas.getContext('2d'), canvas.width, canvas.height);
   }
 
   // Start MediaPipe Holistic

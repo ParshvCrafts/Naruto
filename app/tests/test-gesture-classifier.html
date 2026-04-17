@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GestureClassifier Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+    h1 { color: #9C27B0; }
+  </style>
+</head>
+<body>
+<h1>GestureClassifier Tests</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import GestureClassifier from '../modules/gesture-classifier.js';
+
+const gc  = new GestureClassifier();
+const out = [];
+let passed = 0, failed = 0;
+
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>\n  got: ${actual}, expected: ${expected}`);
+}
+
+/** 21-landmark array, all at (0.5, 0.5, 0), with per-landmark overrides. */
+function lmks(overrides = {}) {
+  const arr = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+  for (const [idx, vals] of Object.entries(overrides)) Object.assign(arr[+idx], vals);
+  return arr;
+}
+
+// ─── Fist landmarks: all tips (8,12,16,20) at y=0.80, MCPs (5,9,13,17) at y=0.50 ───
+// tip.y(0.80) > mcp.y(0.50) + 0.03 ✓ → fist
+const FIST = lmks({ 5:{y:0.50},9:{y:0.50},13:{y:0.50},17:{y:0.50},
+                    8:{y:0.80},12:{y:0.80},16:{y:0.80},20:{y:0.80} });
+
+// ─── Open palm landmarks: all tips at y=0.20, MCPs at y=0.50 ─────────────────────
+// tip.y(0.20) < mcp.y(0.50) - 0.03 ✓ → open
+const OPEN = lmks({ 5:{y:0.50},9:{y:0.50},13:{y:0.50},17:{y:0.50},
+                    8:{y:0.20},12:{y:0.20},16:{y:0.20},20:{y:0.20} });
+
+// T1: null hands → no gestures, leftHandX defaults to 0.5
+{
+  const res = gc.detect(null, null);
+  assert('T1a: isDualFist=false when both null',  res.isDualFist,     false);
+  assert('T1b: isLeftFist=false when left null',  res.isLeftFist,     false);
+  assert('T1c: isLeftOpenPalm=false when null',   res.isLeftOpenPalm, false);
+  assert('T1d: leftHandX=0.5 when left null',     res.leftHandX,      0.5);
+}
+
+// T2: both hands fist → isDualFist
+{
+  const res = gc.detect(FIST, FIST);
+  assert('T2a: isDualFist=true',      res.isDualFist,     true);
+  assert('T2b: isLeftFist=true',      res.isLeftFist,     true);
+  assert('T2c: isLeftOpenPalm=false', res.isLeftOpenPalm, false);
+}
+
+// T3: only left fist → isLeftFist only
+{
+  const res = gc.detect(OPEN, FIST);  // right=open, left=fist
+  assert('T3a: isDualFist=false (right not fist)', res.isDualFist, false);
+  assert('T3b: isLeftFist=true',                   res.isLeftFist, true);
+}
+
+// T4: left open palm → isLeftOpenPalm
+{
+  const res = gc.detect(FIST, OPEN);  // right=fist, left=open
+  assert('T4a: isLeftOpenPalm=true', res.isLeftOpenPalm, true);
+  assert('T4b: isLeftFist=false',    res.isLeftFist,     false);
+}
+
+// T5: leftHandX reflects left wrist x (landmark 0)
+{
+  const leftWithX = lmks({ 0:{x:0.25,y:0.5,z:0}, 5:{y:0.50},9:{y:0.50},13:{y:0.50},17:{y:0.50},
+                            8:{y:0.80},12:{y:0.80},16:{y:0.80},20:{y:0.80} });
+  const res = gc.detect(null, leftWithX);
+  assert('T5: leftHandX=0.25 from wrist landmark', res.leftHandX, 0.25);
+}
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>
