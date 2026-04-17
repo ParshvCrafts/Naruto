@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SignRefinement Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+    h1 { color: #ff6b00; }
+  </style>
+</head>
+<body>
+<h1>SignRefinement Tests</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import SignRefinement from '../modules/sign-refinement.js';
+
+const r   = new SignRefinement();
+const out = [];
+let passed = 0, failed = 0;
+
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>\n  got: ${actual}, expected: ${expected}`);
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────
+
+/** Build a 21-landmark array; all points at (0.5, 0.5, 0) then apply overrides.
+ *  overrides: { [landmarkIndex]: { x?, y?, z? } }
+ */
+function lmks(overrides = {}) {
+  const arr = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+  for (const [idx, vals] of Object.entries(overrides)) {
+    Object.assign(arr[+idx], vals);
+  }
+  return arr;
+}
+
+// ─── Test cases ───────────────────────────────────────────────────────────
+
+// T1: class not in {2,4,5,7} passes through unchanged
+{
+  const res = r.refine(0, 0.80, lmks(), lmks());
+  assert('T1: class 0 (Rat) passes through', res.classId, 0);
+}
+
+// T2: high confidence (≥0.97) passes through even for confused class
+{
+  const res = r.refine(2, 0.98, lmks(), lmks());
+  assert('T2: Tiger conf=0.98 passes through (no gate)', res.classId, 2);
+}
+
+// T3: null landmarks → pass through
+{
+  const res = r.refine(5, 0.80, null, null);
+  assert('T3: null landmarks pass through', res.classId, 5);
+}
+
+// T4: Serpent detection
+// Tips (lmk 8,12,16,20) at y=0.80 (low on screen), MCPs (lmk 5,9,13,17) at y=0.20 (high).
+// avgTipY=0.80 > avgMcpY=0.20 → isSerpentDir=true on both hands → class 5
+{
+  const serpent = lmks({
+    5:{y:0.20}, 9:{y:0.20}, 13:{y:0.20}, 17:{y:0.20},   // MCPs high
+    8:{y:0.80}, 12:{y:0.80}, 16:{y:0.80}, 20:{y:0.80},  // tips low
+  });
+  const res = r.refine(2, 0.80, serpent, serpent);  // MLP says Tiger
+  assert('T4: Serpent (tips below MCPs) → class 5', res.classId, 5);
+}
+
+// T5: Dragon detection
+// lmk 9 (palm proxy) at (0.5, 0.5). Tips within 0.02 of palm center → compact.
+// MCPs slightly below tips (y=0.55) so NOT serpent: avgTipY(0.52) < avgMcpY(0.5375).
+{
+  const dragon = lmks({
+    9:{x:0.5,y:0.5},                                       // palm center
+    5:{x:0.5,y:0.55}, 13:{x:0.5,y:0.55}, 17:{x:0.5,y:0.55}, // MCPs
+    8:{x:0.5,y:0.52}, 12:{x:0.5,y:0.52},                  // tips near palm
+    16:{x:0.5,y:0.52}, 20:{x:0.5,y:0.52},
+  });
+  // avgTipY = 0.52, avgMcpY = avg(0.55,0.5,0.55,0.55)=0.5375 → 0.52 > 0.5375? NO → not serpent
+  // maxDist from palm(0.5,0.5) to tip(0.5,0.52) = 0.02 < 0.18 → dragon
+  const res = r.refine(2, 0.80, dragon, dragon);  // MLP says Tiger
+  assert('T5: Dragon (compact hands) → class 4', res.classId, 4);
+}
+
+// T6: Tiger detection
+// Tips at y=0.20 (above MCPs at y=0.70) → NOT serpent. Tips far from palm → NOT dragon.
+// R[8].y=0.20, L[8].y=0.21 → diff=0.01 < 0.04 → Tiger.
+{
+  const R = lmks({
+    5:{y:0.70}, 9:{y:0.70}, 13:{y:0.70}, 17:{y:0.70},
+    8:{x:0.5,y:0.20}, 12:{y:0.20}, 16:{y:0.20}, 20:{y:0.20},
+  });
+  const L = lmks({
+    5:{y:0.70}, 9:{y:0.70}, 13:{y:0.70}, 17:{y:0.70},
+    8:{x:0.5,y:0.21}, 12:{y:0.20}, 16:{y:0.20}, 20:{y:0.20},
+  });
+  const res = r.refine(7, 0.80, R, L);  // MLP says Ram
+  assert('T6: Tiger (symmetric index heights) → class 2', res.classId, 2);
+}
+
+// T7: Ram detection
+// Same as Tiger setup but L[8].y=0.40 → diff = 0.40-0.20 = 0.20 > 0.06 → Ram.
+{
+  const R = lmks({
+    5:{y:0.70}, 9:{y:0.70}, 13:{y:0.70}, 17:{y:0.70},
+    8:{x:0.5,y:0.20}, 12:{y:0.20}, 16:{y:0.20}, 20:{y:0.20},
+  });
+  const L = lmks({
+    5:{y:0.70}, 9:{y:0.70}, 13:{y:0.70}, 17:{y:0.70},
+    8:{x:0.5,y:0.40}, 12:{y:0.20}, 16:{y:0.20}, 20:{y:0.20},
+  });
+  // avgTipY = avg(0.40,0.20,0.20,0.20) = 0.25, avgMcpY = avg(0.70,0.70,0.70,0.70) = 0.70
+  // not serpent (0.25 < 0.70), not dragon (tips far from palm)
+  // indexDiff = 0.40 - 0.20 = 0.20 > 0.06 → Ram
+  const res = r.refine(2, 0.80, R, L);  // MLP says Tiger
+  assert('T7: Ram (left index lower) → class 7', res.classId, 7);
+}
+
+// ─── Summary ─────────────────────────────────────────────────────────────
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>

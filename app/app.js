@@ -5,7 +5,8 @@ import Detector      from './modules/detector.js';
 import JutsuEngine   from './modules/jutsu-engine.js';
 import Effects       from './modules/effects.js';
 import HUD           from './modules/hud.js';
-import Recorder      from './modules/recorder.js';
+import Recorder        from './modules/recorder.js';
+import SignRefinement  from './modules/sign-refinement.js';
 
 const video       = document.getElementById('video');
 const canvas      = document.getElementById('canvas');
@@ -16,7 +17,8 @@ const detector = new Detector();
 const engine   = new JutsuEngine();
 const fx       = new Effects();
 const hud      = new HUD();
-const recorder = new Recorder();
+const recorder   = new Recorder();
+const refinement = new SignRefinement();
 
 async function init() {
   // Load trained model
@@ -90,9 +92,13 @@ async function init() {
       segmentation.send({ image: video });
     }
 
-    const { classId, confidence } = detector.predict(
+    let { classId, confidence } = detector.predict(
       results.rightHandLandmarks, results.leftHandLandmarks
     );
+    ({ classId, confidence } = refinement.refine(
+      classId, confidence,
+      results.rightHandLandmarks, results.leftHandLandmarks
+    ));
     engine.update(classId, confidence);
 
     fx.render(video, latestMask, { canvas, jutsuActive: engine.isActive() });
