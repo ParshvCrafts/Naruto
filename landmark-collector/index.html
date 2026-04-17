@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Landmark Collector — Naruto Jutsu</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0a0f; color: #ccc;
+      font-family: 'Courier New', monospace;
+      display: flex; flex-direction: column;
+      align-items: center; padding: 16px 12px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    header {
+      display: flex; align-items: center; gap: 16px;
+      margin-bottom: 16px; width: 100%; max-width: 980px;
+    }
+    header h1 { font-size: 1.3rem; color: #ff6b00; letter-spacing: 3px; }
+    header .sub { font-size: 0.75rem; color: #555; margin-top: 2px; }
+
+    /* ── Main layout ──────────────────────────────────────────── */
+    .layout { display: flex; gap: 14px; align-items: flex-start; width: 100%; max-width: 980px; }
+
+    /* ── Canvas area ──────────────────────────────────────────── */
+    .canvas-wrap { position: relative; flex-shrink: 0; }
+    #cv { display: block; border: 1px solid #222; background: #000; }
+
+    /* Countdown HTML overlay (centered on canvas) */
+    .cd-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      pointer-events: none;
+    }
+    #cd-num {
+      font-size: 130px; font-weight: 900; letter-spacing: -4px;
+      color: #ff6b00; text-shadow: 0 0 40px #ff6b00cc;
+      opacity: 0; transition: opacity 0.15s;
+      line-height: 1;
+    }
+    #cd-sign-label {
+      font-size: 18px; color: #ffffff99; letter-spacing: 2px;
+      margin-top: 8px; opacity: 0;
+    }
+
+    /* Status bar pinned to bottom of canvas */
+    #canvas-status {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: rgba(0,0,0,0.72); color: #bbb;
+      font-size: 13px; text-align: center; padding: 5px 8px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────────────── */
+    .sidebar { display: flex; flex-direction: column; gap: 10px; width: 300px; flex-shrink: 0; }
+
+    /* ── Cards ────────────────────────────────────────────────── */
+    .card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid #1f1f2e; border-radius: 8px; padding: 12px;
+    }
+    .card-title {
+      font-size: 0.68rem; color: #ff6b00; letter-spacing: 2px;
+      text-transform: uppercase; margin-bottom: 10px; font-weight: bold;
+    }
+
+    /* ── Form controls ────────────────────────────────────────── */
+    .field { margin-bottom: 9px; }
+    .field label { display: block; font-size: 0.78rem; color: #888; margin-bottom: 3px; }
+    select {
+      width: 100%; padding: 7px 10px;
+      background: #12121e; color: #ddd;
+      border: 1px solid #333; border-radius: 5px;
+      font-family: monospace; font-size: 0.82rem;
+    }
+    select:focus { outline: none; border-color: #ff6b00; }
+
+    /* ── Buttons ──────────────────────────────────────────────── */
+    .btn {
+      width: 100%; padding: 8px 12px; border-radius: 5px;
+      font-family: monospace; font-size: 0.82rem; cursor: pointer;
+      border: 1px solid transparent; transition: all 0.15s;
+    }
+    .btn + .btn { margin-top: 6px; }
+    .btn-start  { background: #ff6b00; color: #fff; border-color: #ff6b00; }
+    .btn-start:hover  { background: #e05c00; }
+    .btn-start:disabled { background: #333; color: #666; border-color: #333; cursor: not-allowed; }
+    .btn-stop   { background: transparent; color: #e74c3c; border-color: #e74c3c; }
+    .btn-stop:hover { background: rgba(231,76,60,0.12); }
+    .btn-export { background: #0d2b19; color: #2ecc71; border-color: #2ecc71; }
+    .btn-export:hover:not(:disabled) { background: #2ecc71; color: #000; }
+    .btn-export:disabled { color: #444; border-color: #333; background: transparent; cursor: not-allowed; }
+    .btn-clear  { background: transparent; color: #888; border-color: #333; }
+    .btn-clear:hover:not(:disabled) { color: #ccc; border-color: #555; }
+    .btn-clear:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* ── Progress section ─────────────────────────────────────── */
+    #status-msg {
+      font-size: 0.82rem; color: #aaa; min-height: 18px;
+      margin-bottom: 7px; line-height: 1.4;
+    }
+    .timer-track {
+      height: 3px; background: #1f1f2e; border-radius: 2px;
+      overflow: hidden; margin-bottom: 9px;
+    }
+    #timer-bar {
+      height: 100%; width: 0%; background: #ff6b00;
+      transition: width 0.1s linear; border-radius: 2px;
+    }
+    .dots { display: flex; gap: 5px; margin-bottom: 4px; }
+    .dot {
+      flex: 1; height: 8px; border-radius: 3px;
+      background: #1f1f2e; transition: background 0.25s;
+    }
+    .dot.done  { background: #ff6b00; }
+    .dot.skipped { background: #e74c3c; }
+
+    /* ── Collected chips ──────────────────────────────────────── */
+    .sign-chip {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 5px 8px; border-radius: 5px; margin-bottom: 5px;
+      background: rgba(255,255,255,0.02);
+      border-left: 3px solid #1f1f2e;
+      font-size: 0.8rem; transition: border-color 0.2s;
+    }
+    .sign-chip.has-data { border-left-color: #ff6b00; }
+    .sign-chip.complete { border-left-color: #2ecc71; }
+    .chip-name { color: #aaa; }
+    .chip-count { color: #666; font-size: 0.75rem; }
+    .sign-chip.has-data .chip-count { color: #ff6b00; }
+    .sign-chip.complete .chip-count { color: #2ecc71; }
+
+    /* ── Live finger status ───────────────────────────────────── */
+    .hands-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .hand-panel {
+      background: rgba(0,0,0,0.3); border: 1px solid #1a1a2a;
+      border-radius: 5px; padding: 7px;
+    }
+    .hand-label { font-size: 0.65rem; color: #666; letter-spacing: 1px; margin-bottom: 5px; }
+    .finger-row {
+      display: flex; justify-content: space-between;
+      font-size: 0.72rem; padding: 1px 0;
+    }
+    .fn { color: #666; }
+    .fv-ext  { color: #2ecc71; }
+    .fv-curl { color: #e74c3c; }
+    .fv-none { color: #333; }
+
+    /* ── Warnings ─────────────────────────────────────────────── */
+    #warn-msg {
+      font-size: 0.78rem; color: #e74c3c; min-height: 16px;
+      margin-top: 3px; letter-spacing: 0.5px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>⚡ LANDMARK COLLECTOR</h1>
+    <div class="sub">Geometric analysis tool — Naruto Jutsu sign disambiguation</div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ── Camera canvas ──────────────────────────────────────── -->
+  <div class="canvas-wrap">
+    <canvas id="cv" width="640" height="480"></canvas>
+    <div class="cd-overlay">
+      <div id="cd-num"></div>
+      <div id="cd-sign-label"></div>
+    </div>
+    <div id="canvas-status">Initializing camera…</div>
+  </div>
+
+  <!-- ── Sidebar ────────────────────────────────────────────── -->
+  <div class="sidebar">
+
+    <!-- Collection controls -->
+    <div class="card">
+      <div class="card-title">Collection Setup</div>
+
+      <div class="field">
+        <label>Sign to collect:</label>
+        <select id="sign-select">
+          <option value="tiger">Tora (Tiger) — class 2</option>
+          <option value="ram">Hitsuji (Ram) — class 7</option>
+          <option value="serpent">Mi (Serpent) — class 5</option>
+          <option value="dragon">Tatsu (Dragon) — class 4</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Countdown before start:</label>
+        <select id="cd-select">
+          <option value="3">3 seconds</option>
+          <option value="5">5 seconds</option>
+          <option value="1">1 second (quick)</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Interval between samples:</label>
+        <select id="interval-select">
+          <option value="2500" selected>2.5 seconds</option>
+          <option value="2000">2 seconds</option>
+          <option value="3000">3 seconds</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Samples per sign:</label>
+        <select id="samples-select">
+          <option value="5" selected>5 samples</option>
+          <option value="8">8 samples (more robust)</option>
+          <option value="3">3 samples (quick)</option>
+        </select>
+      </div>
+
+      <button id="btn-start" class="btn btn-start">▶  Start Collection</button>
+      <button id="btn-stop"  class="btn btn-stop"  style="display:none">⏹  Stop</button>
+      <div id="warn-msg"></div>
+    </div>
+
+    <!-- Session progress -->
+    <div class="card">
+      <div class="card-title">Session Progress</div>
+      <div id="status-msg">Ready — select a sign and press Start</div>
+      <div class="timer-track"><div id="timer-bar"></div></div>
+      <div class="dots" id="dots-row"></div>
+    </div>
+
+    <!-- Collected data -->
+    <div class="card">
+      <div class="card-title">Collected Data</div>
+      <div id="sign-chips"></div>
+      <button id="btn-export" class="btn btn-export" disabled>📥  Export Analysis JSON</button>
+      <button id="btn-clear"  class="btn btn-clear"  disabled>🗑  Clear All Data</button>
+    </div>
+
+    <!-- Live finger status -->
+    <div class="card">
+      <div class="card-title">Live Finger Status</div>
+      <div class="hands-grid">
+        <div class="hand-panel">
+          <div class="hand-label">RIGHT HAND</div>
+          <div id="right-fingers"><span class="fv-none">No hand</span></div>
+        </div>
+        <div class="hand-panel">
+          <div class="hand-label">LEFT HAND</div>
+          <div id="left-fingers"><span class="fv-none">No hand</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /sidebar -->
+</div><!-- /layout -->
+
+<!-- MediaPipe CDN (globals: Holistic, Camera, drawConnectors, drawLandmarks, HAND_CONNECTIONS) -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const LMK_NAMES = [
+  'WRIST',
+  'THUMB_CMC',         'THUMB_MCP',         'THUMB_IP',          'THUMB_TIP',
+  'INDEX_FINGER_MCP',  'INDEX_FINGER_PIP',  'INDEX_FINGER_DIP',  'INDEX_FINGER_TIP',
+  'MIDDLE_FINGER_MCP', 'MIDDLE_FINGER_PIP', 'MIDDLE_FINGER_DIP', 'MIDDLE_FINGER_TIP',
+  'RING_FINGER_MCP',   'RING_FINGER_PIP',   'RING_FINGER_DIP',   'RING_FINGER_TIP',
+  'PINKY_MCP',         'PINKY_PIP',         'PINKY_DIP',         'PINKY_TIP',
+];
+
+const FINGER_DEFS = [
+  { name: 'thumb',  tip: 4,  pip: 3,  mcp: 2  },
+  { name: 'index',  tip: 8,  pip: 6,  mcp: 5  },
+  { name: 'middle', tip: 12, pip: 10, mcp: 9  },
+  { name: 'ring',   tip: 16, pip: 14, mcp: 13 },
+  { name: 'pinky',  tip: 20, pip: 18, mcp: 17 },
+];
+
+// Minimum y-distance (tip above MCP) to consider a finger "extended" (y↓ in image space)
+const EXTEND_MARGIN = 0.04;
+
+const SIGNS = [
+  { id: 'tiger',   name: 'Tora (Tiger)',   classId: 2, color: '#e74c3c' },
+  { id: 'ram',     name: 'Hitsuji (Ram)',  classId: 7, color: '#3498db' },
+  { id: 'serpent', name: 'Mi (Serpent)',   classId: 5, color: '#2ecc71' },
+  { id: 'dragon',  name: 'Tatsu (Dragon)', classId: 4, color: '#9b59b6' },
+];
+
+// Fallback hand connections if CDN global is not exported
+const HC_FALLBACK = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17],
+];
+const HC = (typeof HAND_CONNECTIONS !== 'undefined') ? HAND_CONNECTIONS : HC_FALLBACK;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  APPLICATION STATE
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _state        = 'idle';     // 'idle' | 'countdown' | 'collecting'
+let _currentSign  = 'tiger';
+let _targetSamples = 5;         // configurable
+let _sampleInterval = 2500;     // ms between samples
+let _cdDuration   = 3000;       // countdown ms
+
+let _samplesDone  = 0;
+let _cdStart      = 0;
+let _lastSample   = 0;
+let _captureFlash = 0;          // 0-1 white flash opacity
+let _latestResults = null;
+
+// { signId → [sampleObjects] }
+const _collected = {};
+SIGNS.forEach(s => (_collected[s.id] = []));
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DOM REFERENCES
+// ═══════════════════════════════════════════════════════════════════════════
+
+const cvEl        = document.getElementById('cv');
+const ctx2d       = cvEl.getContext('2d');
+const cdNumEl     = document.getElementById('cd-num');
+const cdSignLabel = document.getElementById('cd-sign-label');
+const canvasSt    = document.getElementById('canvas-status');
+const statusMsg   = document.getElementById('status-msg');
+const timerBar    = document.getElementById('timer-bar');
+const dotsRow     = document.getElementById('dots-row');
+const btnStart    = document.getElementById('btn-start');
+const btnStop     = document.getElementById('btn-stop');
+const btnExport   = document.getElementById('btn-export');
+const btnClear    = document.getElementById('btn-clear');
+const signSelect  = document.getElementById('sign-select');
+const cdSelect    = document.getElementById('cd-select');
+const intSelect   = document.getElementById('interval-select');
+const sampSelect  = document.getElementById('samples-select');
+const warnMsg     = document.getElementById('warn-msg');
+const rightFingersEl = document.getElementById('right-fingers');
+const leftFingersEl  = document.getElementById('left-fingers');
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  EVENT HANDLERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+btnStart.addEventListener('click', () => {
+  _currentSign   = signSelect.value;
+  _cdDuration    = parseInt(cdSelect.value) * 1000;
+  _sampleInterval = parseInt(intSelect.value);
+  _targetSamples  = parseInt(sampSelect.value);
+  _samplesDone   = 0;
+  _cdStart       = performance.now();
+  _state         = 'countdown';
+  warnMsg.textContent = '';
+
+  btnStart.style.display = 'none';
+  btnStop.style.display  = 'block';
+
+  rebuildDots();
+  statusMsg.textContent = `Get ready — preparing ${getSignName(_currentSign)}…`;
+  cdSignLabel.textContent = getSignName(_currentSign).toUpperCase();
+});
+
+btnStop.addEventListener('click', () => resetToIdle('Stopped.'));
+
+btnExport.addEventListener('click', exportJSON);
+
+btnClear.addEventListener('click', () => {
+  if (!confirm('Clear all collected landmark data?')) return;
+  SIGNS.forEach(s => (_collected[s.id] = []));
+  renderChips();
+  btnExport.disabled = true;
+  btnClear.disabled  = true;
+  statusMsg.textContent = 'All data cleared.';
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PER-FRAME MEDIAPIPE CALLBACK
+// ═══════════════════════════════════════════════════════════════════════════
+
+function onResults(results) {
+  _latestResults = results;
+  const w = cvEl.width, h = cvEl.height;
+
+  // ── Draw mirrored camera feed + hand skeleton ────────────────────
+  ctx2d.save();
+  ctx2d.translate(w, 0);
+  ctx2d.scale(-1, 1);
+  ctx2d.drawImage(results.image, 0, 0, w, h);
+
+  if (results.rightHandLandmarks) {
+    drawConnectors(ctx2d, results.rightHandLandmarks, HC,
+      { color: '#00FF88', lineWidth: 1.5 });
+    drawLandmarks(ctx2d, results.rightHandLandmarks,
+      { color: '#00FF88', fillColor: '#004422', lineWidth: 1, radius: 3 });
+  }
+  if (results.leftHandLandmarks) {
+    drawConnectors(ctx2d, results.leftHandLandmarks, HC,
+      { color: '#FF8800', lineWidth: 1.5 });
+    drawLandmarks(ctx2d, results.leftHandLandmarks,
+      { color: '#FF8800', fillColor: '#442200', lineWidth: 1, radius: 3 });
+  }
+  ctx2d.restore();
+
+  // ── Draw capture flash (un-mirrored space) ───────────────────────
+  if (_captureFlash > 0) {
+    ctx2d.fillStyle = `rgba(255,255,255,${_captureFlash})`;
+    ctx2d.fillRect(0, 0, w, h);
+    _captureFlash = Math.max(0, _captureFlash - 0.07);
+  }
+
+  // ── Draw collection ring in bottom-right ─────────────────────────
+  if (_state === 'collecting') {
+    const progress = Math.min(1, (performance.now() - _lastSample) / _sampleInterval);
+    drawCollectionRing(w - 46, h - 46, 30, progress, _samplesDone, _targetSamples);
+  }
+
+  // ── Run state machine ────────────────────────────────────────────
+  tickStateMachine();
+
+  // ── Update live finger panel ─────────────────────────────────────
+  renderFingerStatus(results.rightHandLandmarks, results.leftHandLandmarks);
+}
+
+function drawCollectionRing(cx, cy, r, progress, done, total) {
+  ctx2d.save();
+  // Background ring
+  ctx2d.beginPath();
+  ctx2d.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx2d.strokeStyle = '#1a1a2e';
+  ctx2d.lineWidth   = 5;
+  ctx2d.stroke();
+  // Progress arc
+  ctx2d.beginPath();
+  ctx2d.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+  ctx2d.strokeStyle = '#ff6b00';
+  ctx2d.lineWidth   = 5;
+  ctx2d.lineCap     = 'round';
+  ctx2d.stroke();
+  // Sample counter text
+  ctx2d.fillStyle    = '#fff';
+  ctx2d.font         = `bold 12px monospace`;
+  ctx2d.textAlign    = 'center';
+  ctx2d.textBaseline = 'middle';
+  ctx2d.fillText(`${done}/${total}`, cx, cy);
+  ctx2d.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  STATE MACHINE
+// ═══════════════════════════════════════════════════════════════════════════
+
+function tickStateMachine() {
+  const now = performance.now();
+
+  if (_state === 'countdown') {
+    const elapsed    = now - _cdStart;
+    const remaining  = Math.ceil((_cdDuration - elapsed) / 1000);
+    const secs       = Math.max(0, remaining);
+
+    cdNumEl.style.opacity    = 1;
+    cdSignLabel.style.opacity = 1;
+
+    if (remaining <= 0) {
+      cdNumEl.textContent    = 'GO!';
+      cdNumEl.style.color    = '#2ecc71';
+      cdNumEl.style.textShadow = '0 0 40px #2ecc71cc';
+    } else {
+      cdNumEl.textContent    = secs;
+      cdNumEl.style.color    = secs === 1 ? '#f39c12' : '#ff6b00';
+      cdNumEl.style.textShadow = `0 0 40px ${secs === 1 ? '#f39c12cc' : '#ff6b00cc'}`;
+    }
+
+    canvasSt.textContent = `${getSignName(_currentSign)} — starting in ${secs}s`;
+
+    if (elapsed >= _cdDuration) {
+      // Transition to COLLECTING
+      _state      = 'collecting';
+      _lastSample = now;          // first capture fires after one full interval
+      hideCdOverlay();
+      statusMsg.textContent = `Hold the ${getSignName(_currentSign)} sign — don't move!`;
+    }
+    return;
+  }
+
+  if (_state === 'collecting') {
+    const timeSince = now - _lastSample;
+    timerBar.style.width = Math.min(100, (timeSince / _sampleInterval) * 100) + '%';
+
+    canvasSt.textContent =
+      `HOLD SIGN — ${_samplesDone}/${_targetSamples} captured · next in ~${
+        Math.max(0, Math.ceil((_sampleInterval - timeSince) / 1000))}s`;
+
+    if (timeSince >= _sampleInterval) {
+      attemptCapture(now);
+    }
+  }
+}
+
+function attemptCapture(now) {
+  const r = _latestResults;
+  if (!r) { _lastSample = now; return; }
+
+  const rLmks = r.rightHandLandmarks;
+  const lLmks = r.leftHandLandmarks;
+  const hasRight = rLmks && rLmks.length >= 21;
+  const hasLeft  = lLmks && lLmks.length  >= 21;
+
+  if (!hasRight && !hasLeft) {
+    warnMsg.textContent = '⚠ No hands detected — move into frame (skipping)';
+    _lastSample = now;
+    return;
+  }
+  if (!hasRight || !hasLeft) {
+    warnMsg.textContent = '⚠ Only one hand visible — both hands needed (skipping)';
+    _lastSample = now;
+    return;
+  }
+
+  warnMsg.textContent = '';
+  const sample = buildSample(_currentSign, _samplesDone + 1, rLmks, lLmks);
+  _collected[_currentSign].push(sample);
+  _samplesDone++;
+  _lastSample  = now;
+  _captureFlash = 0.75;
+
+  updateDots();
+  renderChips();
+  statusMsg.textContent = `✓ Sample ${_samplesDone}/${_targetSamples} captured`;
+
+  if (_samplesDone >= _targetSamples) {
+    resetToIdle(`✓ Complete — ${_targetSamples} samples for ${getSignName(_currentSign)}`);
+    btnExport.disabled = false;
+    btnClear.disabled  = false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DATA BUILDERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function r4(v) { return Math.round(v * 10000) / 10000; }
+
+/**
+ * Build the full analysis object for one hand.
+ * Returns null if landmarks are absent or incomplete.
+ */
+function analyzeHand(lmks, label) {
+  if (!lmks || lmks.length < 21) return null;
+
+  // ── Raw landmarks ───────────────────────────────────────────────
+  const landmarks = lmks.map((l, i) => ({
+    index: i,
+    name:  LMK_NAMES[i],
+    x: r4(l.x),
+    y: r4(l.y),
+    z: r4(l.z),
+  }));
+
+  // ── Wrist-origin normalized landmarks ──────────────────────────
+  // Translate so wrist (lmk 0) is origin; scale by wrist→index_MCP (lmk 5) distance.
+  // Removes absolute position; captures hand shape & finger angles only.
+  const wx = lmks[0].x, wy = lmks[0].y, wz = lmks[0].z;
+  const dx = lmks[5].x - wx, dy = lmks[5].y - wy, dz = lmks[5].z - wz;
+  const scale = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1;
+  const landmarks_normalized = lmks.map((l, i) => ({
+    index: i,
+    name:  LMK_NAMES[i],
+    x: r4((l.x - wx) / scale),
+    y: r4((l.y - wy) / scale),
+    z: r4((l.z - wz) / scale),
+  }));
+
+  // ── Finger state analysis ────────────────────────────────────────
+  const fingers = {};
+  FINGER_DEFS.forEach(f => {
+    const tip_y  = lmks[f.tip].y;
+    const pip_y  = lmks[f.pip].y;
+    const mcp_y  = lmks[f.mcp].y;
+    const diff   = mcp_y - tip_y;  // positive = fingertip is ABOVE mcp (extended upward)
+    fingers[f.name] = {
+      extended:         diff > EXTEND_MARGIN,
+      tip_y:            r4(tip_y),
+      pip_y:            r4(pip_y),
+      mcp_y:            r4(mcp_y),
+      tip_x:            r4(lmks[f.tip].x),
+      // Height of tip above MCP in normalized coords (positive = extended toward camera top)
+      height_above_mcp: r4(diff),
+      // Curl ratio: how much the finger is curled (tip y relative to pip y, then pip rel to mcp)
+      pip_to_mcp_diff:  r4(mcp_y - pip_y),
+    };
+  });
+
+  const extended_fingers = FINGER_DEFS
+    .filter(f => fingers[f.name].extended)
+    .map(f => f.name);
+
+  return {
+    present:               true,
+    hand:                  label,
+    landmarks,
+    landmarks_normalized,
+    fingers,
+    extended_fingers,
+    extended_count:        extended_fingers.length,
+    fingertip_heights: {   // raw y for quick comparison (lower y = higher on screen)
+      thumb:  r4(lmks[4].y),
+      index:  r4(lmks[8].y),
+      middle: r4(lmks[12].y),
+      ring:   r4(lmks[16].y),
+      pinky:  r4(lmks[20].y),
+    },
+    wrist: { x: r4(lmks[0].x), y: r4(lmks[0].y), z: r4(lmks[0].z) },
+  };
+}
+
+/**
+ * Build a full sample record including cross-hand geometric analysis.
+ */
+function buildSample(signId, sampleNum, rLmks, lLmks) {
+  const right = analyzeHand(rLmks, 'right');
+  const left  = analyzeHand(lLmks, 'left');
+
+  // ── Cross-hand analysis ──────────────────────────────────────────
+  const cross = { hands_detected: (right ? 1 : 0) + (left ? 1 : 0) };
+
+  if (right && left) {
+    // Per-finger tip height comparison (right.tip_y − left.tip_y)
+    // NEGATIVE = right finger is higher on screen (smaller y)
+    // POSITIVE = left finger is higher on screen
+    const tipDiff = {};
+    FINGER_DEFS.forEach(f => {
+      const rv = right.fingers[f.name].tip_y;
+      const lv = left.fingers[f.name].tip_y;
+      const d  = r4(rv - lv);
+      tipDiff[f.name] = {
+        right_tip_y:   rv,
+        left_tip_y:    lv,
+        diff_R_minus_L: d,
+        right_higher:  d < -0.03,
+        left_higher:   d >  0.03,
+        symmetric:     Math.abs(d) < 0.03,
+        note: d < -0.05 ? `right ${f.name} is ${Math.abs(d).toFixed(3)} above left`
+            : d >  0.05 ? `left ${f.name} is ${Math.abs(d).toFixed(3)} above right`
+            : `symmetric (Δ=${d.toFixed(3)})`,
+      };
+    });
+    cross.fingertip_height_diffs = tipDiff;
+
+    // Wrist height comparison
+    const wd = r4(right.wrist.y - left.wrist.y);
+    cross.wrist_height_diff = {
+      right_wrist_y: right.wrist.y,
+      left_wrist_y:  left.wrist.y,
+      diff_R_minus_L: wd,
+      right_higher:  wd < -0.02,
+      left_higher:   wd >  0.02,
+      note: wd < -0.04 ? `right wrist ${Math.abs(wd).toFixed(3)} above left`
+          : wd >  0.04 ? `left wrist ${Math.abs(wd).toFixed(3)} above right`
+          : 'wrists at similar height',
+    };
+
+    // Which fingers both hands have extended simultaneously
+    const bothExtend = {};
+    FINGER_DEFS.forEach(f => {
+      bothExtend[f.name] = right.fingers[f.name].extended && left.fingers[f.name].extended;
+    });
+    cross.both_hands_extend = bothExtend;
+    cross.right_extended_fingers = right.extended_fingers;
+    cross.left_extended_fingers  = left.extended_fingers;
+    cross.same_extended_pattern  = JSON.stringify([...right.extended_fingers].sort()) ===
+                                   JSON.stringify([...left.extended_fingers].sort());
+
+    // Horizontal spread (x distance between wrists)
+    const wristSpread = r4(Math.abs(right.wrist.x - left.wrist.x));
+    cross.wrist_x_spread = { value: wristSpread, note: wristSpread < 0.15 ? 'hands close together' : 'hands spread apart' };
+  }
+
+  return {
+    id:                  `${signId}_${sampleNum}`,
+    sign:                signId,
+    sample:              sampleNum,
+    timestamp:           new Date().toISOString(),
+    hands_detected:      cross.hands_detected,
+    right_hand:          right  ?? { present: false },
+    left_hand:           left   ?? { present: false },
+    cross_hand_analysis: cross,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  JSON EXPORT
+// ═══════════════════════════════════════════════════════════════════════════
+
+function exportJSON() {
+  const totalSamples = SIGNS.reduce((acc, s) => acc + _collected[s.id].length, 0);
+  if (totalSamples === 0) return;
+
+  // ── Per-sign summaries ──────────────────────────────────────────
+  const summaries = {};
+  SIGNS.forEach(sg => {
+    const samples = _collected[sg.id];
+    if (samples.length === 0) return;
+
+    // Aggregate average height diffs across samples
+    const avgDiffs = {};
+    FINGER_DEFS.forEach(f => {
+      const vals = samples
+        .filter(s => s.cross_hand_analysis.fingertip_height_diffs)
+        .map(s => s.cross_hand_analysis.fingertip_height_diffs[f.name]?.diff_R_minus_L ?? null)
+        .filter(v => v !== null);
+      if (vals.length === 0) return;
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const std = Math.sqrt(vals.reduce((a, b) => a + (b - avg) ** 2, 0) / vals.length);
+      avgDiffs[f.name] = {
+        avg_diff_R_minus_L: r4(avg),
+        std_dev:            r4(std),
+        right_consistently_higher: avg < -0.04,
+        left_consistently_higher:  avg >  0.04,
+        consistently_symmetric:    Math.abs(avg) < 0.04 && std < 0.04,
+        verdict: avg < -0.05 ? 'RIGHT HAND HIGHER'
+               : avg >  0.05 ? 'LEFT HAND HIGHER'
+               : 'SYMMETRIC',
+      };
+    });
+
+    // Majority extended fingers (appear in >50% of samples)
+    const rExt = {}, lExt = {};
+    samples.forEach(s => {
+      (s.right_hand.extended_fingers ?? []).forEach(f => rExt[f] = (rExt[f] || 0) + 1);
+      (s.left_hand.extended_fingers  ?? []).forEach(f => lExt[f] = (lExt[f] || 0) + 1);
+    });
+    const thresh = Math.ceil(samples.length / 2);
+    const rMaj = FINGER_DEFS.map(f => f.name).filter(f => (rExt[f] || 0) >= thresh);
+    const lMaj = FINGER_DEFS.map(f => f.name).filter(f => (lExt[f] || 0) >= thresh);
+
+    summaries[sg.id] = {
+      sign:                         sg.id,
+      class_id:                     sg.classId,
+      display_name:                 sg.name,
+      sample_count:                 samples.length,
+      right_extended_majority:      rMaj,
+      left_extended_majority:       lMaj,
+      avg_fingertip_height_diffs:   avgDiffs,
+      avg_wrist_height_diff:        (() => {
+        const vals = samples
+          .filter(s => s.cross_hand_analysis.wrist_height_diff)
+          .map(s => s.cross_hand_analysis.wrist_height_diff.diff_R_minus_L);
+        if (!vals.length) return null;
+        const a = vals.reduce((a, b) => a + b, 0) / vals.length;
+        return { avg: r4(a), verdict: a < -0.03 ? 'RIGHT WRIST HIGHER' : a > 0.03 ? 'LEFT WRIST HIGHER' : 'SYMMETRIC' };
+      })(),
+      pattern_notes:                generateNotes(sg.id, rMaj, lMaj, avgDiffs),
+    };
+  });
+
+  const output = {
+    metadata: {
+      tool:            'naruto-jutsu landmark-collector v1.0',
+      captured_at:     new Date().toISOString(),
+      purpose:         'Geometric disambiguation of confused hand signs: Tiger/Ram, Serpent/Dragon',
+      extend_margin:   EXTEND_MARGIN,
+      coordinate_system: {
+        origin:  'top-left of video frame',
+        x:       '0 = left edge, 1 = right edge',
+        y:       '0 = top edge, 1 = bottom edge (y increases downward)',
+        z:       'depth — negative toward camera',
+        note:    'All values are MediaPipe normalized (0-1 range, un-mirrored camera space)',
+      },
+      landmark_index_guide: LMK_NAMES.map((name, i) => ({ index: i, name })),
+      signs_collected: SIGNS.filter(s => _collected[s.id].length > 0).map(s => s.id),
+      total_samples:   totalSamples,
+    },
+    summaries,
+    samples: _collected,
+  };
+
+  const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), {
+    href:     url,
+    download: `landmarks_${new Date().toISOString().slice(0,10)}.json`,
+  });
+  a.click();
+  URL.revokeObjectURL(url);
+  statusMsg.textContent = `✓ Exported ${totalSamples} samples across ${Object.keys(summaries).length} signs`;
+}
+
+function generateNotes(signId, rMaj, lMaj, diffs) {
+  const notes = [];
+  const idx = diffs.index,  mid = diffs.middle;
+  if (idx) notes.push(`Index: ${idx.verdict} (avg Δ=${idx.avg_diff_R_minus_L})`);
+  if (mid) notes.push(`Middle: ${mid.verdict} (avg Δ=${mid.avg_diff_R_minus_L})`);
+  notes.push(`Right extends: [${rMaj.join(',')}]`);
+  notes.push(`Left extends: [${lMaj.join(',')}]`);
+
+  if (signId === 'tiger' && idx?.consistently_symmetric && mid?.consistently_symmetric) {
+    notes.push('>>> TIGER PATTERN CONFIRMED: both hands at same height');
+  }
+  if (signId === 'ram' && (idx?.left_consistently_higher || mid?.left_consistently_higher)) {
+    notes.push('>>> RAM PATTERN CONFIRMED: left hand consistently above right');
+  }
+  if (signId === 'serpent') {
+    const thumbD = diffs.thumb;
+    if (thumbD) notes.push(`Thumb: ${thumbD.verdict} (Δ=${thumbD.avg_diff_R_minus_L})`);
+    notes.push('>>> SERPENT: look for fingertips pointing downward (low height_above_mcp values)');
+  }
+  if (signId === 'dragon') {
+    notes.push('>>> DRAGON: look for compact palm (low wrist spread) and short finger extension');
+  }
+  return notes.join(' | ');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getSignName(id) { return SIGNS.find(s => s.id === id)?.name ?? id; }
+
+function resetToIdle(message) {
+  _state               = 'idle';
+  _samplesDone         = 0;
+  timerBar.style.width = '0%';
+  hideCdOverlay();
+  btnStart.style.display = 'block';
+  btnStop.style.display  = 'none';
+  statusMsg.textContent  = message ?? 'Ready';
+  canvasSt.textContent   = 'Camera active';
+}
+
+function hideCdOverlay() {
+  cdNumEl.style.opacity    = 0;
+  cdSignLabel.style.opacity = 0;
+  cdNumEl.textContent       = '';
+}
+
+function rebuildDots() {
+  dotsRow.innerHTML = '';
+  for (let i = 0; i < _targetSamples; i++) {
+    const d = document.createElement('div');
+    d.className = 'dot';
+    d.id = `dot-${i}`;
+    dotsRow.appendChild(d);
+  }
+}
+
+function updateDots() {
+  for (let i = 0; i < _targetSamples; i++) {
+    const d = document.getElementById(`dot-${i}`);
+    if (d) d.className = 'dot' + (i < _samplesDone ? ' done' : '');
+  }
+}
+
+function renderChips() {
+  const container = document.getElementById('sign-chips');
+  container.innerHTML = SIGNS.map(sg => {
+    const cnt  = _collected[sg.id].length;
+    const done = cnt >= _targetSamples;
+    const cls  = cnt === 0 ? 'sign-chip' : done ? 'sign-chip complete' : 'sign-chip has-data';
+    return `<div class="${cls}">
+      <span class="chip-name" style="color:${sg.color}">${sg.name}</span>
+      <span class="chip-count">${cnt}/${_targetSamples}</span>
+    </div>`;
+  }).join('');
+
+  const hasAny = SIGNS.some(s => _collected[s.id].length > 0);
+  btnExport.disabled = !hasAny;
+  btnClear.disabled  = !hasAny;
+}
+
+function renderFingerStatus(rLmks, lLmks) {
+  rightFingersEl.innerHTML = buildFingerHTML(rLmks);
+  leftFingersEl.innerHTML  = buildFingerHTML(lLmks);
+}
+
+function buildFingerHTML(lmks) {
+  if (!lmks || lmks.length < 21) return '<span class="fv-none">No hand</span>';
+  return FINGER_DEFS.map(f => {
+    const diff = lmks[f.mcp].y - lmks[f.tip].y;
+    const ext  = diff > EXTEND_MARGIN;
+    return `<div class="finger-row">
+      <span class="fn">${f.name.padEnd(6,' ')}</span>
+      <span class="${ext ? 'fv-ext' : 'fv-curl'}">${ext ? '↑ ext' : '↓ curl'}</span>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MEDIAPIPE SETUP
+// ═══════════════════════════════════════════════════════════════════════════
+
+const video = document.createElement('video');
+video.setAttribute('autoplay', '');
+video.setAttribute('playsinline', '');
+video.style.display = 'none';
+document.body.appendChild(video);
+
+const holistic = new Holistic({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`,
+});
+holistic.setOptions({
+  modelComplexity:        1,
+  smoothLandmarks:        true,
+  minDetectionConfidence: 0.5,
+  minTrackingConfidence:  0.5,
+});
+holistic.onResults(onResults);
+
+const camera = new Camera(video, {
+  onFrame: async () => { await holistic.send({ image: video }); },
+  width: 640, height: 480,
+});
+camera.start()
+  .then(() => {
+    canvasSt.textContent = 'Camera active — ready to collect';
+    renderChips();
+    rebuildDots();
+  })
+  .catch(e => {
+    canvasSt.textContent = `Camera error: ${e.message}`;
+    statusMsg.textContent = 'Could not start camera.';
+  });
+
+</script>
+</body>
+</html>

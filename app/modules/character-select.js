@@ -20,7 +20,8 @@ const CHARACTERS = [
   { id: 'sasuke', name: 'SASUKE', color: '#9C27B0', imgFile: 'sasuke.jpg' },
 ];
 
-const LERP_FACTOR      = 0.12;   // scroll interpolation speed per frame (higher = snappier)
+const LERP_FACTOR      = 0.20;   // scroll interpolation speed per frame (higher = snappier)
+const SCROLL_SENSITIVITY = 2.2;  // amplify hand-position mapping (2.0 = half frame width covers full range)
 const CONFIRM_DURATION = 600;    // ms for pulse glow before locking selection
 const CARD_W           = 160;    // active card width (px in canvas space)
 const CARD_H           = 284;    // active card height (9:16 of 160px)
@@ -71,9 +72,19 @@ export default class CharacterSelect {
         break;
 
       case STATE.SELECTING:
-        // Map left hand wrist x (0→1) to target card index (0 → nCards-1)
+        // Thumb-up on right hand → exit overlay without changing selection
+        if (g.isRightThumbUp) {
+          this._state        = STATE.IDLE;
+          this._lastLeftFist = false;
+          break;
+        }
+
+        // Map left hand wrist x (0→1) to target card index, with center-biased sensitivity.
+        // SCROLL_SENSITIVITY=2.2 means moving hand ±0.23 from center reaches either end.
         if (g.isLeftFist) {
-          this._targetScrollX = g.leftHandX * (CHARACTERS.length - 1);
+          const amplified = (g.leftHandX - 0.5) * SCROLL_SENSITIVITY + 0.5;
+          const clamped   = Math.max(0, Math.min(1, amplified));
+          this._targetScrollX = clamped * (CHARACTERS.length - 1);
         }
         // Lerp toward target each frame
         this._scrollX += (this._targetScrollX - this._scrollX) * LERP_FACTOR;
@@ -102,6 +113,11 @@ export default class CharacterSelect {
       }
 
       case STATE.SELECTED:
+        // Thumb-up on right hand → dismiss overlay, keep selection, return to IDLE
+        if (g.isRightThumbUp) {
+          this._state = STATE.IDLE;
+          break;
+        }
         if (g.isDualFist) {
           this._state = STATE.SELECTING;
           this._lastLeftFist = false;
@@ -140,13 +156,16 @@ export default class CharacterSelect {
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'alphabetic';
 
+    // Title — anchored above card area with generous room
+    const titleY = h * 0.08;
     ctx.font      = 'bold 22px monospace';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText('SELECT CHARACTER', w / 2, h * 0.13);
+    ctx.fillText('SELECT CHARACTER', w / 2, titleY);
 
+    // Instructions
     ctx.font      = '13px monospace';
     ctx.fillStyle = 'rgba(255,255,255,0.50)';
-    ctx.fillText('✊  Move fist to scroll   •   ✋  Open palm to select', w / 2, h * 0.13 + 26);
+    ctx.fillText('✊  Move fist to scroll   •   ✋  Open palm to select   •   👍  Confirm & exit', w / 2, titleY + 24);
     ctx.restore();
   }
 
@@ -237,7 +256,7 @@ export default class CharacterSelect {
       ctx.save();
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'alphabetic';
-      ctx.font         = `bold ${Math.round(13 * scale)}px monospace`;
+      ctx.font         = `bold ${Math.round(16 * scale)}px monospace`;
       ctx.fillStyle    = t > 0.5 ? char.color : 'rgba(255,255,255,0.35)';
       ctx.globalAlpha  = 0.35 + 0.65 * t;
       if (t > 0.5) {
@@ -254,15 +273,20 @@ export default class CharacterSelect {
       const idx  = Math.max(0, Math.min(CHARACTERS.length - 1, Math.round(this._scrollX)));
       const char = CHARACTERS.find(c => c.id === (this._selected ?? CHARACTERS[idx].id));
       if (!char) return;
+
+      // Place status text just above the active card's top edge
+      const cardTop   = h * 0.50 - CARD_H / 2;
+      const statusY   = cardTop - 14;
+
       ctx.save();
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'alphabetic';
-      ctx.font         = 'bold 14px monospace';
+      ctx.font         = 'bold 15px monospace';
       ctx.fillStyle    = char.color;
       ctx.shadowColor  = char.color;
-      ctx.shadowBlur   = 10;
-      const label = this._state === STATE.SELECTED ? 'CHARACTER LOCKED IN' : 'LOCKING IN...';
-      ctx.fillText(label, w / 2, h * 0.13 + 56);
+      ctx.shadowBlur   = 12;
+      const label = this._state === STATE.SELECTED ? '✦  CHARACTER LOCKED IN  ✦' : '⟳  LOCKING IN...';
+      ctx.fillText(label, w / 2, statusY);
       ctx.restore();
     }
   }

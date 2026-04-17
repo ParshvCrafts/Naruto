@@ -9,6 +9,7 @@ import Recorder          from './modules/recorder.js';
 import SignRefinement    from './modules/sign-refinement.js';
 import GestureClassifier from './modules/gesture-classifier.js';
 import CharacterSelect   from './modules/character-select.js';
+import { isReleaseSign, SpeechListener } from './modules/release-detector.js';
 
 const video       = document.getElementById('video');
 const canvas      = document.getElementById('canvas');
@@ -19,10 +20,11 @@ const detector = new Detector();
 const engine   = new JutsuEngine();
 const fx       = new Effects();
 const hud      = new HUD();
-const recorder   = new Recorder();
-const refinement = new SignRefinement();
-const gc         = new GestureClassifier();
-const cs         = new CharacterSelect();
+const recorder       = new Recorder();
+const refinement     = new SignRefinement();
+const gc             = new GestureClassifier();
+const cs             = new CharacterSelect();
+const speechListener = new SpeechListener();
 let selectedCharacter = null;
 
 async function init() {
@@ -71,6 +73,10 @@ async function init() {
     fx.triggerClones();
     fx.burstParticles(canvas.width / 2, canvas.height * 0.6);
     hud.showActivation('Shadow Clone Jutsu');
+    // Shadow Clone persists until Release gesture + spoken "release".
+    // Start listening for voice command immediately on activation.
+    speechListener.start();
+    console.log('[app] Shadow Clone active — show release sign + say "release" to dismiss');
   });
 
   // Fireball Jutsu — Snake→Ram→Monkey→Boar→Horse→Tiger
@@ -140,6 +146,21 @@ async function init() {
       ));
     }
     engine.update(classId, confidence);
+
+    // ── Shadow Clone Release check ─────────────────────────────────────────────────
+    // Triggered only when Shadow Clone is the active jutsu.
+    // Requires BOTH: Release hand sign (left index+middle up) AND spoken word "release".
+    if (engine.getActiveJutsu() === 'shadowClone') {
+      const signShown = isReleaseSign(results.leftHandLandmarks);
+      if (signShown && speechListener.consumeRelease()) {
+        console.log('[app] RELEASE JUTSU — Shadow Clone dismissed');
+        engine.reset();
+        speechListener.stop();
+      }
+    } else if (!engine.isActive() && speechListener.isSupported) {
+      // Clean up speech listener if jutsu ended by other means (e.g. engine.reset() called externally)
+      speechListener.stop();
+    }
 
     // ── Rendering ─────────────────────────────────────────────────────────────────
     fx.render(video, latestMask, { canvas, jutsuActive: engine.isActive() });

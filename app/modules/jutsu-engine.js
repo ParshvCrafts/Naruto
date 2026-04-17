@@ -18,6 +18,7 @@ export default class JutsuEngine {
     this._seqTimeout  = 5000;   // ms before incomplete sequence resets
     this._seqActive   = null;   // jutsuName currently in progress
     this._character   = null;   // 'naruto' | 'sasuke' | null — gates jutsu activation
+    this._activeJutsu = null;   // name of currently active jutsu, or null
   }
 
   onActivation(jutsuName, callback) {
@@ -101,15 +102,20 @@ export default class JutsuEngine {
 
   _activate(jutsuName) {
     if (this._active) return;
-    this._active = true;
+    this._active     = true;
+    this._activeJutsu = jutsuName;
     this._window.fill(this._NONE_CLASS);
     console.log(`[engine] ACTIVATE: ${jutsuName}`);
     if (this._handlers[jutsuName]) this._handlers[jutsuName]();
-    // Auto-reset after 8s
-    this._activeTimer = setTimeout(() => { this.reset(); }, 8000);
+    // Shadow Clone persists until manual Release gesture — no auto-reset.
+    // All other jutsu auto-reset after 8s as a safety net.
+    if (jutsuName !== 'shadowClone') {
+      this._activeTimer = setTimeout(() => { this.reset(); }, 8000);
+    }
   }
 
-  isActive() { return this._active; }
+  isActive()      { return this._active; }
+  getActiveJutsu() { return this._activeJutsu; }
 
   getSequenceState() {
     if (!this._seqActive) return { jutsuName: null, completed: [], pending: [] };
@@ -129,6 +135,7 @@ export default class JutsuEngine {
   reset() {
     clearTimeout(this._activeTimer);
     this._active      = false;
+    this._activeJutsu = null;
     this._seqBuffer   = [];
     this._seqActive   = null;
     this._seqLastTime = 0;

@@ -8,6 +8,9 @@ const CURL_MARGIN   = 0.03;   // tip.y > mcp.y + margin → finger curled (in im
 // How far a fingertip must be ABOVE its MCP to count as extended (open palm).
 const EXTEND_MARGIN = 0.03;   // tip.y < mcp.y - margin → finger extended
 
+// Thumb tip (4) must be this far above thumb MCP (2) to count as "thumb up".
+const THUMB_UP_MARGIN = 0.06;
+
 // MediaPipe hand model landmark indices (same for left and right hands)
 const TIP_IDX = [8, 12, 16, 20];  // index, middle, ring, pinky fingertips
 const MCP_IDX = [5,  9, 13, 17];  // corresponding MCP (knuckle) joints
@@ -19,22 +22,25 @@ export default class GestureClassifier {
    * @param {Array<{x,y,z}>|null} rightLmks  21 MediaPipe right-hand landmarks, or null if absent
    * @param {Array<{x,y,z}>|null} leftLmks   21 MediaPipe left-hand landmarks, or null if absent
    * @returns {{
-   *   isDualFist:     boolean,   both hands closed fist
-   *   isLeftFist:     boolean,   left hand closed fist
-   *   isLeftOpenPalm: boolean,   left hand fully open (all 4 fingers extended)
-   *   leftHandX:      number     left wrist x (normalized 0→1), 0.5 if absent
+   *   isDualFist:      boolean,   both hands closed fist
+   *   isLeftFist:      boolean,   left hand closed fist
+   *   isLeftOpenPalm:  boolean,   left hand fully open (all 4 fingers extended)
+   *   isRightThumbUp:  boolean,   right hand thumb up with other fingers curled
+   *   leftHandX:       number     left wrist x (normalized 0→1), 0.5 if absent
    * }}
    */
   detect(rightLmks, leftLmks) {
-    const rightFist = rightLmks && rightLmks.length >= 21 ? _isFist(rightLmks) : false;
-    const leftFist  = leftLmks  && leftLmks.length  >= 21 ? _isFist(leftLmks)  : false;
-    const leftOpen  = leftLmks  && leftLmks.length  >= 21 ? _isOpenPalm(leftLmks) : false;
-    const leftX     = leftLmks  && leftLmks.length  >= 21 ? leftLmks[0].x : 0.5;
+    const rightFist    = rightLmks && rightLmks.length >= 21 ? _isFist(rightLmks)    : false;
+    const leftFist     = leftLmks  && leftLmks.length  >= 21 ? _isFist(leftLmks)     : false;
+    const leftOpen     = leftLmks  && leftLmks.length  >= 21 ? _isOpenPalm(leftLmks) : false;
+    const rightThumbUp = rightLmks && rightLmks.length >= 21 ? _isThumbUp(rightLmks) : false;
+    const leftX        = leftLmks  && leftLmks.length  >= 21 ? leftLmks[0].x         : 0.5;
 
     return {
       isDualFist:     rightFist && leftFist,
       isLeftFist:     leftFist,
       isLeftOpenPalm: leftOpen,
+      isRightThumbUp: rightThumbUp,
       leftHandX:      leftX,
     };
   }
@@ -50,4 +56,12 @@ function _isFist(lmks) {
 function _isOpenPalm(lmks) {
   // All 4 fingers must be extended: tip.y < mcp.y - EXTEND_MARGIN
   return TIP_IDX.every((tipIdx, i) => lmks[tipIdx].y < lmks[MCP_IDX[i]].y - EXTEND_MARGIN);
+}
+
+function _isThumbUp(lmks) {
+  // Thumb tip (4) must be well above thumb MCP (2) — indicates thumb pointing up
+  const thumbExtended = lmks[4].y < lmks[2].y - THUMB_UP_MARGIN;
+  // All 4 fingers (index→pinky) must be curled — rest of hand is a fist
+  const fingersCurled = TIP_IDX.every((t, i) => lmks[t].y > lmks[MCP_IDX[i]].y + CURL_MARGIN);
+  return thumbExtended && fingersCurled;
 }

@@ -143,10 +143,10 @@ export default class HUD {
     roundRect(ctx, x, y, pillW, pillH, 8);
     ctx.fill();
 
-    // Orange glow border
-    ctx.strokeStyle = '#ff6b00';
+    // Glow border — uses current chakra color (matches character theme)
+    ctx.strokeStyle = this._chakraColor;
     ctx.lineWidth   = 1.5;
-    ctx.shadowColor = '#ff6b00';
+    ctx.shadowColor = this._chakraColor;
     ctx.shadowBlur  = 8;
     roundRect(ctx, x, y, pillW, pillH, 8);
     ctx.stroke();
@@ -154,7 +154,7 @@ export default class HUD {
 
     // Jutsu name
     ctx.font      = 'bold 13px monospace';
-    ctx.fillStyle = '#ff6b00';
+    ctx.fillStyle = this._chakraColor;
     ctx.fillText(this._splash.text.toUpperCase(), x + 10, y + 22);
 
     // "JUTSU ACTIVATED" label
@@ -180,7 +180,7 @@ export default class HUD {
     roundRect(ctx, panelX - 10, panelY - 32, totalW + 20, cardH + 44, 10);
     ctx.fill();
     ctx.font      = 'bold 12px monospace';
-    ctx.fillStyle = '#ff6b00';
+    ctx.fillStyle = this._chakraColor;
     ctx.textAlign = 'center';
     ctx.fillText(seqState.jutsuName.toUpperCase(), w / 2, panelY - 12);
 
@@ -191,12 +191,12 @@ export default class HUD {
       const hasSignImg = signImg && signImg.complete && signImg.naturalWidth > 0;
 
       // Card background
-      ctx.fillStyle = isDone ? 'rgba(255,107,0,0.3)' : 'rgba(20,20,40,0.8)';
+      ctx.fillStyle = isDone ? this._chakraColor + '4D' : 'rgba(20,20,40,0.8)';  // 4D = 30% opacity
       roundRect(ctx, cx, panelY, cardW, cardH, 6);
       ctx.fill();
 
       // Card border
-      ctx.strokeStyle = isDone ? '#ff6b00' : '#333';
+      ctx.strokeStyle = isDone ? this._chakraColor : '#333';
       ctx.lineWidth   = isDone ? 2 : 1;
       roundRect(ctx, cx, panelY, cardW, cardH, 6);
       ctx.stroke();
@@ -216,8 +216,8 @@ export default class HUD {
       // Label below image
       const labelY = panelY + cardH - 10;
       ctx.font        = isDone ? 'bold 10px monospace' : '10px monospace';
-      ctx.fillStyle   = isDone ? '#ff6b00' : '#555';
-      ctx.shadowColor = isDone ? '#ff6b00' : 'transparent';
+      ctx.fillStyle   = isDone ? this._chakraColor : '#555';
+      ctx.shadowColor = isDone ? this._chakraColor : 'transparent';
       ctx.shadowBlur  = isDone ? 6 : 0;
       ctx.textAlign   = 'center';
       const label = (SIGN_NAMES[card] ?? '???').split(' ')[0];
