@@ -138,7 +138,7 @@ export default class Effects {
     this._releaseOnComplete = null;
 
     // Reset per-clone state so smokes spawn fresh on re-trigger
-    this._CLONE_DEFS.forEach(def => { def._smokeDone = false; });
+    this._CLONE_DEFS.forEach(def => { def._smokeDone = false; def._notYetSpawned = false; });
     this._activeSmokes   = [];
     this._cloneStartTime = performance.now();
     this._flashOpacity   = 0.8;
@@ -166,9 +166,11 @@ export default class Effects {
 
     const maxDelay = Math.max(...this._CLONE_DEFS.map(d => d.delay));
     const minDelay = Math.min(...this._CLONE_DEFS.map(d => d.delay));
+    const elapsedAtRelease = this._cloneStartTime ? performance.now() - this._cloneStartTime : 0;
     this._CLONE_DEFS.forEach(def => {
       def._disappearDelay   = maxDelay - def.delay;   // 0 = vanish immediately
       def._releaseSmokeDone = false;
+      def._notYetSpawned    = def.delay > elapsedAtRelease;  // skip clones not yet visible
     });
     this._maxDisappearDelay  = maxDelay - minDelay;   // = 2250
     this._releaseStartTime   = performance.now();
@@ -234,6 +236,7 @@ export default class Effects {
       let   opacity     = Math.min(1, fadeElapsed / 300);   // 300ms fade-in per clone
 
       if (this._releasePending) {
+        if (def._notYetSpawned) return;   // skip clones that hadn't appeared when release triggered
         // Fade out in reverse order: each clone starts fading at its _disappearDelay
         const fadeOutElapsed = releaseElapsed - def._disappearDelay;
         const fadeOut        = Math.max(0, Math.min(1, fadeOutElapsed / 200));
