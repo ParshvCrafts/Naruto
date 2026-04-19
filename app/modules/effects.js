@@ -133,6 +133,9 @@ export default class Effects {
     // Cancel stale clone_pop timeouts from previous trigger
     this._cloneTimeouts.forEach(id => clearTimeout(id));
     this._cloneTimeouts = [];
+    // Abort any in-flight release animation
+    this._releasePending    = false;
+    this._releaseOnComplete = null;
 
     // Reset per-clone state so smokes spawn fresh on re-trigger
     this._CLONE_DEFS.forEach(def => { def._smokeDone = false; });
@@ -155,7 +158,7 @@ export default class Effects {
    * @param {function} onComplete  Called when animation ends — caller should call engine.reset() here
    */
   triggerRelease(onComplete) {
-    if (!this._chakraActive) return;   // nothing to release
+    if (!this._chakraActive || this._releasePending) return;   // nothing to release, or already releasing
 
     // Cancel pending clone-pop sounds from initial spawn
     this._cloneTimeouts.forEach(id => clearTimeout(id));
@@ -189,6 +192,12 @@ export default class Effects {
       this._releaseOnComplete = null;
     }
     console.log('[effects] release animation complete');
+  }
+
+  /** Cancel any in-flight release animation without calling onComplete. */
+  abortRelease() {
+    this._releasePending    = false;
+    this._releaseOnComplete = null;
   }
 
   _extractPerson(videoEl, segMask, w, h) {

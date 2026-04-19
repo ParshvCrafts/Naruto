@@ -233,6 +233,7 @@ async function init() {
   document.addEventListener('keydown', e => {
     // 'r' key: release Shadow Clone Jutsu (backup release when voice/gesture fails)
     if ((e.key === 'r' || e.key === 'R') && engine.getActiveJutsu() === 'shadowClone') {
+      fx.abortRelease();
       engine.reset();
       speechListener.stop();
       console.log('[app] Shadow Clone released via R key');
