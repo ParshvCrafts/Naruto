@@ -3,7 +3,7 @@ const SIGN_NAMES = [
   'Ne (Rat)', 'Ushi (Ox)', 'Tora (Tiger)', 'U (Hare)',
   'Tatsu (Dragon)', 'Mi (Snake)', 'Uma (Horse)', 'Hitsuji (Ram)',
   'Saru (Monkey)', 'Tori (Bird)', 'Inu (Dog)', 'I (Boar)',
-  'Kage Bunshin', 'None'
+  'Kage Bunshin', 'None', 'Release'
 ];
 
 // Image filenames for each class (index = classId; null = no image)
@@ -11,12 +11,12 @@ const SIGN_IMAGES = [
   'rat.png', 'ox.png', 'tiger.png', 'hare.png',
   'dragon.png', 'serpent.png', 'horse.png', 'ram.png',
   'monkey.png', 'bird.png', 'dog.png', 'boar.png',
-  'shadow_clone.png', null
+  'shadow_clone.png', null, 'release.png'
 ];
 
 export default class HUD {
   constructor() {
-    this._chakraColor = '#00BFFF';
+    this._chakraColor = '#ff6b00';
     this._splash      = null;  // { text, startTime }
     this._signImgs    = {};    // classId → HTMLImageElement (loaded lazily)
     this._imgBase     = '/assets/signs';
@@ -41,7 +41,7 @@ export default class HUD {
     this._drawActivationSplash(ctx, hudCanvas.width);
 
     // Sign display (top-left)
-    if (classId !== 13 && classId >= 0 && classId <= 12 && Number.isInteger(classId) && confidence >= 0.5) {
+    if (classId >= 0 && classId <= 14 && classId !== 13 && Number.isInteger(classId) && confidence >= 0.5) {
       this._drawSignDisplay(ctx, classId, confidence);
     }
 
@@ -74,14 +74,14 @@ export default class HUD {
       ctx.restore();
 
       // Thin chakra-colored border around thumbnail
-      ctx.strokeStyle = this._chakraColor;
+      ctx.strokeStyle = '#ff6b00';
       ctx.lineWidth   = 1.5;
       roundRect(ctx, 14, 11, 56, 56, 5);
       ctx.stroke();
 
       // Sign name — offset right of image
       ctx.font      = 'bold 16px monospace';
-      ctx.fillStyle = this._chakraColor;
+      ctx.fillStyle = '#ffffff';
       ctx.fillText(name, 78, 34);
 
       // Confidence bar background
@@ -101,7 +101,7 @@ export default class HUD {
     } else {
       // No image — text-only layout
       ctx.font      = 'bold 18px monospace';
-      ctx.fillStyle = this._chakraColor;
+      ctx.fillStyle = '#ffffff';
       ctx.fillText(name, 20, 36);
 
       ctx.fillStyle = '#333';
@@ -154,7 +154,7 @@ export default class HUD {
 
     // Jutsu name
     ctx.font      = 'bold 13px monospace';
-    ctx.fillStyle = this._chakraColor;
+    ctx.fillStyle = '#ffffff';
     ctx.fillText(this._splash.text.toUpperCase(), x + 10, y + 22);
 
     // "JUTSU ACTIVATED" label
