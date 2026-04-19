@@ -171,9 +171,11 @@ async function init() {
         releaseHoldFrames++;
         if (releaseHoldFrames >= RELEASE_HOLD_THRESHOLD) {
           releaseHoldFrames = 0;
-          engine.reset();
           speechListener.stop();
-          console.log('[app] RELEASE JUTSU — Shadow Clone dismissed (sign held)');
+          fx.triggerRelease(() => {
+            engine.reset();
+            console.log('[app] RELEASE JUTSU — Shadow Clone dismissed (animation complete)');
+          });
         }
       } else {
         releaseHoldFrames = 0;

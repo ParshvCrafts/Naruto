@@ -37,6 +37,12 @@ export default class Effects {
     this._sounds   = {};
     this._audioCtx = null;
     this._cloneTimeouts = [];
+
+    // Sequential release animation state
+    this._releasePending       = false;
+    this._releaseStartTime     = 0;
+    this._releaseOnComplete    = null;
+    this._maxDisappearDelay    = 0;
   }
 
   init(canvas) {
@@ -102,6 +108,7 @@ export default class Effects {
 
     // Layers 2-3: clones + smoke (pass pre-extracted person)
     this._drawClones(person, w, h);
+    if (this._releasePending) this._checkReleaseComplete();
 
     // Layer 4: chakra aura
     if (this._chakraActive) this._drawAura(segMask, w, h);
@@ -141,6 +148,49 @@ export default class Effects {
     console.log('[effects] clones triggered');
   }
 
+  /**
+   * Begin sequential clone disappearance in reverse spawn order.
+   * Clones with the highest spawn delay (last to appear) vanish first.
+   * Calls onComplete() after all clones have faded (~2450ms).
+   * @param {function} onComplete  Called when animation ends — caller should call engine.reset() here
+   */
+  triggerRelease(onComplete) {
+    if (!this._chakraActive) return;   // nothing to release
+
+    // Cancel pending clone-pop sounds from initial spawn
+    this._cloneTimeouts.forEach(id => clearTimeout(id));
+    this._cloneTimeouts = [];
+
+    const maxDelay = Math.max(...this._CLONE_DEFS.map(d => d.delay));
+    const minDelay = Math.min(...this._CLONE_DEFS.map(d => d.delay));
+    this._CLONE_DEFS.forEach(def => {
+      def._disappearDelay   = maxDelay - def.delay;   // 0 = vanish immediately
+      def._releaseSmokeDone = false;
+    });
+    this._maxDisappearDelay  = maxDelay - minDelay;   // = 2250
+    this._releaseStartTime   = performance.now();
+    this._releasePending     = true;
+    this._releaseOnComplete  = onComplete;
+    console.log('[effects] release triggered — clones fading in reverse order');
+  }
+
+  _checkReleaseComplete() {
+    const releaseElapsed = performance.now() - this._releaseStartTime;
+    if (releaseElapsed < this._maxDisappearDelay + 200) return;
+
+    // All clones faded — clean up and notify caller
+    this._releasePending   = false;
+    this._chakraActive     = false;
+    this._cloneStartTime   = null;
+    this._activeSmokes     = [];
+    this._particles        = [];
+    if (this._releaseOnComplete) {
+      this._releaseOnComplete();
+      this._releaseOnComplete = null;
+    }
+    console.log('[effects] release animation complete');
+  }
+
   _extractPerson(videoEl, segMask, w, h) {
     // NOTE on coordinate space: _personCanvas is drawn in raw (unmirrored) space.
     // In render(), ctx.drawImage(person, 0, 0) is called inside the ctx.save()/scale(-1,1) block,
@@ -166,20 +216,36 @@ export default class Effects {
     const elapsed = now - this._cloneStartTime;
     const ctx     = this._ctx;
 
+    const releaseElapsed = this._releasePending ? now - this._releaseStartTime : -1;
+
     this._CLONE_DEFS.forEach(def => {
       if (elapsed < def.delay) return;
 
       const fadeElapsed = elapsed - def.delay;
-      const opacity     = Math.min(1, fadeElapsed / 300);  // 300ms fade-in per clone
+      let   opacity     = Math.min(1, fadeElapsed / 300);   // 300ms fade-in per clone
 
-      // Spawn 2 smoke sprites per clone exactly once
-      if (!def._smokeDone) {
-        def._smokeDone = true;
-        this._spawnSmoke(w / 2 + def.x - 40, h / 2 + def.y, def.scale, now);
-        this._spawnSmoke(w / 2 + def.x + 40, h / 2 + def.y, def.scale, now);
+      if (this._releasePending) {
+        // Fade out in reverse order: each clone starts fading at its _disappearDelay
+        const fadeOutElapsed = releaseElapsed - def._disappearDelay;
+        const fadeOut        = Math.max(0, Math.min(1, fadeOutElapsed / 200));
+        opacity              = opacity * (1 - fadeOut);
+
+        // Spawn dismissal smoke once when this clone's fade-out begins
+        if (!def._releaseSmokeDone && releaseElapsed >= def._disappearDelay) {
+          def._releaseSmokeDone = true;
+          this._spawnSmoke(w / 2 + def.x - 40, h / 2 + def.y, def.scale, now);
+          this._spawnSmoke(w / 2 + def.x + 40, h / 2 + def.y, def.scale, now);
+        }
+      } else {
+        // Normal spawn: spawn smoke once when clone first appears
+        if (!def._smokeDone) {
+          def._smokeDone = true;
+          this._spawnSmoke(w / 2 + def.x - 40, h / 2 + def.y, def.scale, now);
+          this._spawnSmoke(w / 2 + def.x + 40, h / 2 + def.y, def.scale, now);
+        }
       }
 
-      if (!person) return;
+      if (opacity <= 0 || !person) return;
       ctx.save();
       ctx.globalAlpha = opacity * 0.85;
       ctx.translate(w / 2 + def.x, h / 2 + def.y);
