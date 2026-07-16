@@ -22,3 +22,6 @@ env/
 
 # Git worktrees
 .worktrees/
+
+# Training image datasets (large; reproducible via landmark-collector download scripts)
+more_data/
