@@ -1,4 +1,163 @@
 // effects.js — Canvas rendering (layers 1-7)
+import { log } from './log.js';
+import { RASENGAN, CHIDORI, FIREBALL } from './config.js';
+
+/**
+ * VideoFX — a looping video sprite composited with `screen` blend at a hand anchor.
+ * Generic: Rasengan now, Chidori (S16) reuses it. Drawn INSIDE effects.js's mirrored
+ * transform so a raw normalized landmark maps onto the mirrored hand naturally.
+ */
+export class VideoFX {
+  constructor(src, cfg) {
+    this._cfg = cfg;
+    this._vid = document.createElement('video');
+    this._vid.src = src;
+    this._vid.muted = true;
+    this._vid.playsInline = true;
+    this._vid.preload = 'auto';
+    this._vid.loop = false;
+    this._active = false;
+    this._releasing = false;
+    this._scale = cfg.SCALE_START;
+    this._releaseStart = 0;
+    this._ax = null; this._ay = null;   // EMA-smoothed anchor (normalized 0-1)
+    // Seamless loop: after the spin-up intro plays through, jump back to LOOP_POINT.
+    this._vid.addEventListener('ended', () => {
+      if (!this._active) return;
+      try { this._vid.currentTime = cfg.LOOP_POINT; this._vid.play().catch(() => {}); } catch {}
+    });
+  }
+
+  activate() {
+    this._active = true;
+    this._releasing = false;
+    this._scale = this._cfg.SCALE_START;
+    this._ax = this._ay = null;
+    try { this._vid.currentTime = 0; } catch {}
+    this._vid.play().catch(() => {});
+  }
+
+  release() {
+    if (this._active && !this._releasing) { this._releasing = true; this._releaseStart = performance.now(); }
+  }
+
+  forceStop() { this._active = false; this._releasing = false; try { this._vid.pause(); } catch {} }
+  isActive() { return this._active; }
+  isReleasing() { return this._releasing; }
+
+  setAnchor(nx, ny) {
+    const a = this._cfg.ANCHOR_EMA;
+    this._ax = this._ax == null ? nx : this._ax + a * (nx - this._ax);
+    this._ay = this._ay == null ? ny : this._ay + a * (ny - this._ay);
+  }
+
+  anchorPx(w, h) { return this._ax == null ? null : { x: this._ax * w, y: this._ay * h }; }
+
+  /** Current draw size (width, px) accounting for growth + release shrink. */
+  drawSize(h) {
+    let shrink = 1;
+    if (this._releasing) {
+      const p = Math.min(1, (performance.now() - this._releaseStart) / this._cfg.RELEASE_MS);
+      shrink = 1 - 0.7 * p;               // 1 → 0.3
+    }
+    return this._cfg.BASE_FRAC * h * this._scale * shrink;
+  }
+
+  /** Draw the orb inside the already-mirrored ctx. Returns false when fully released. */
+  draw(ctx, w, h) {
+    if (!this._active || this._ax == null) return false;
+    let alpha = 1;
+    if (this._releasing) {
+      const p = (performance.now() - this._releaseStart) / this._cfg.RELEASE_MS;
+      if (p >= 1) { this.forceStop(); return false; }
+      alpha = 1 - p;
+    } else if (this._scale < this._cfg.SCALE_MAX) {
+      this._scale += this._cfg.SCALE_RAMP;
+    }
+    const vid = this._vid;
+    if (!vid.videoWidth) return true;      // not decoded yet — keep alive
+    const wpx = this.drawSize(h);
+    const hpx = wpx * (vid.videoHeight / vid.videoWidth);  // preserve source aspect (orb stays round)
+    const cx = this._ax * w, cy = this._ay * h;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.globalCompositeOperation = 'screen';
+    ctx.drawImage(vid, cx - wpx / 2, cy - hpx / 2, wpx, hpx);
+    ctx.restore();
+    return true;
+  }
+}
+
+/**
+ * FireballFX — directional flame breathed from the mouth (S17). Extends VideoFX but
+ * anchors the flame's ORIGIN edge at the mouth (rather than centering an orb) so the
+ * jet extends horizontally outward, and adds a brief full-frame ignition burst.
+ */
+export class FireballFX extends VideoFX {
+  constructor(src, cfg, burstSrc) {
+    super(src, cfg);
+    this._burst = null;
+    this._burstStart = 0;
+    if (burstSrc) {
+      const b = document.createElement('video');
+      b.src = burstSrc; b.muted = true; b.playsInline = true; b.preload = 'auto'; b.loop = false;
+      this._burst = b;
+    }
+  }
+
+  activate() {
+    super.activate();
+    if (this._burst) {
+      this._burstStart = performance.now();
+      try { this._burst.currentTime = 0; this._burst.play().catch(() => {}); } catch {}
+    }
+  }
+
+  /** Directional draw: flame core sits on the mouth anchor, jet extends horizontally. */
+  draw(ctx, w, h) {
+    if (!this._active || this._ax == null) return false;
+    let alpha = 1;
+    if (this._releasing) {
+      const p = (performance.now() - this._releaseStart) / this._cfg.RELEASE_MS;
+      if (p >= 1) { this.forceStop(); return false; }
+      alpha = 1 - p;
+    } else if (this._scale < this._cfg.SCALE_MAX) {
+      this._scale += this._cfg.SCALE_RAMP;
+    }
+    const vid = this._vid;
+    if (!vid.videoWidth) return true;               // not decoded yet — keep alive
+    const wpx = this.drawSize(h);
+    const hpx = wpx * (vid.videoHeight / vid.videoWidth);
+    const cx = this._ax * w, cy = this._ay * h;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.globalCompositeOperation = 'screen';
+    // Pull the left edge back slightly so the intense core overlaps the mouth and
+    // the bulk of the jet extends outward from it.
+    ctx.drawImage(vid, cx - wpx * 0.15, cy - hpx / 2, wpx, hpx);
+    ctx.restore();
+    return true;
+  }
+
+  /** Full-frame ignition flash for the first BURST_MS after activation. */
+  drawBurst(ctx, w, h) {
+    if (!this._burst || !this._burst.videoWidth) return;
+    const t = performance.now() - this._burstStart;
+    if (t < 0 || t > this._cfg.BURST_MS) return;
+    const p = t / this._cfg.BURST_MS;                       // 0 → 1
+    const env = p < 0.15 ? p / 0.15 : 1 - (p - 0.15) / 0.85; // quick attack, slow fade
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, this._cfg.BURST_ALPHA * env);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.drawImage(this._burst, 0, 0, w, h);
+    ctx.restore();
+  }
+}
+
+// Set to true to replay activation sounds when clones are dismissed.
+// Set to false to release silently.
+const PLAY_RELEASE_SOUND = true;
+
 export default class Effects {
   constructor() {
     this._chakraColor    = '#00BFFF';
@@ -10,23 +169,37 @@ export default class Effects {
     this._chakraActive   = false;
     this._cloneStartTime = null;
 
+    // xFrac is a fraction of (w/2) — clone body center lands at (w/2 + xFrac*(w/2)).
+    // This scales correctly for any camera resolution (640p, 720p, 1080p, etc.).
+    // xFrac 1.0 = body center exactly at the screen edge; >1.0 = partially off-screen.
     this._CLONE_DEFS = [
-      { x: -260, y:  10, scale: 0.75, delay: 1000 },
-      { x:  260, y:  10, scale: 0.75, delay: 1200 },
-      { x: -180, y:  20, scale: 0.80, delay: 1400 },
-      { x:  180, y:  20, scale: 0.80, delay: 1600 },
-      { x: -320, y: -10, scale: 0.70, delay: 1800 },
-      { x:  320, y: -10, scale: 0.70, delay: 2000 },
-      { x: -100, y:  30, scale: 0.85, delay: 2200 },
-      { x:  100, y:  30, scale: 0.85, delay: 2400 },
-      { x: -380, y:   0, scale: 0.65, delay: 2600 },
-      { x:  380, y:   0, scale: 0.65, delay: 2800 },
-      { x: -220, y: -20, scale: 0.78, delay: 3000 },
-      { x:  220, y: -20, scale: 0.78, delay: 3000 },
-      { x:  -60, y:  15, scale: 0.88, delay: 3100 },
-      { x:   60, y:  15, scale: 0.88, delay: 3100 },
-      { x: -150, y:  -5, scale: 0.72, delay: 3250 },
-      { x:  150, y:  -5, scale: 0.72, delay: 3250 },
+      // Pair 1 — closest to real person
+      { xFrac: -0.125, y:  10, scale: 0.88, delay:  800 },
+      { xFrac:  0.125, y:  10, scale: 0.88, delay: 1000 },
+      // Pair 2
+      { xFrac: -0.250, y:  20, scale: 0.86, delay: 1200 },
+      { xFrac:  0.250, y:  20, scale: 0.86, delay: 1400 },
+      // Pair 3
+      { xFrac: -0.375, y:   5, scale: 0.84, delay: 1600 },
+      { xFrac:  0.375, y:   5, scale: 0.84, delay: 1800 },
+      // Pair 4
+      { xFrac: -0.500, y: -10, scale: 0.82, delay: 2000 },
+      { xFrac:  0.500, y: -10, scale: 0.82, delay: 2200 },
+      // Pair 5
+      { xFrac: -0.625, y:  15, scale: 0.80, delay: 2400 },
+      { xFrac:  0.625, y:  15, scale: 0.80, delay: 2600 },
+      // Pair 6
+      { xFrac: -0.750, y:  -5, scale: 0.79, delay: 2800 },
+      { xFrac:  0.750, y:  -5, scale: 0.79, delay: 2800 },
+      // Pair 7
+      { xFrac: -0.875, y:   0, scale: 0.78, delay: 2950 },
+      { xFrac:  0.875, y:   0, scale: 0.78, delay: 2950 },
+      // Pair 8 — body center ~40px from screen edge at 1280px
+      { xFrac: -0.938, y:  10, scale: 0.77, delay: 3100 },
+      { xFrac:  0.938, y:  10, scale: 0.77, delay: 3100 },
+      // Pair 9 — body center just past edge; partial silhouette for "army beyond" effect
+      { xFrac: -1.031, y:  -5, scale: 0.76, delay: 3250 },
+      { xFrac:  1.031, y:  -5, scale: 0.76, delay: 3250 },
     ];
 
     this._smokeVariants = ['smoke_1', 'smoke_2', 'smoke_3', 'smoke_small_1'];
@@ -43,7 +216,35 @@ export default class Effects {
     this._releaseStartTime     = 0;
     this._releaseOnComplete    = null;
     this._maxDisappearDelay    = 0;
+
+    // Jutsu video sprites (S15/S16/S17) — created in preload()
+    this._rasengan = null;
+    this._chidori  = null;
+    this._fireball = null;
+    this._arcs     = [];   // procedural lightning polylines (chidori)
+    this._arcFrame = 0;
   }
+
+  // ── Rasengan (VideoFX) API ─────────────────────────────────────────────────
+  rasenganActivate()          { this._rasengan?.activate(); }
+  rasenganRelease()           { this._rasengan?.release(); }
+  rasenganForceStop()         { this._rasengan?.forceStop(); }
+  setRasenganAnchor(nx, ny)   { this._rasengan?.setAnchor(nx, ny); }
+  isRasenganActive()          { return !!this._rasengan?.isActive(); }
+
+  // ── Chidori (VideoFX + lightning) API ───────────────────────────────────────
+  chidoriActivate()           { this._chidori?.activate(); }
+  chidoriRelease()            { this._chidori?.release(); }
+  chidoriForceStop()          { this._chidori?.forceStop(); }
+  setChidoriAnchor(nx, ny)    { this._chidori?.setAnchor(nx, ny); }
+  isChidoriActive()           { return !!this._chidori?.isActive(); }
+
+  // ── Fireball (FireballFX) API — mouth-anchored directional flame (S17) ────────
+  fireballActivate()          { this._fireball?.activate(); }
+  fireballRelease()           { this._fireball?.release(); }
+  fireballForceStop()         { this._fireball?.forceStop(); }
+  setFireballAnchor(nx, ny)   { this._fireball?.setAnchor(nx, ny); }
+  isFireballActive()          { return !!this._fireball?.isActive(); }
 
   init(canvas) {
     this._canvas = canvas;
@@ -57,7 +258,11 @@ export default class Effects {
         const key = `${variant}/${f}`;
         const img = new Image();
         img.src   = `${assetsBase}/smoke/${variant}/${f}.png`;
-        imgPromises.push(new Promise(r => { img.onload = r; img.onerror = r; }));
+        // B12: surface broken assets instead of silently resolving as success.
+        imgPromises.push(new Promise(r => {
+          img.onload  = r;
+          img.onerror = () => { log.warn('effects', `smoke asset failed: ${key}`); r(); };
+        }));
         this._smokeImages[key] = img;
       }
     });
@@ -67,7 +272,8 @@ export default class Effects {
 
     // Sound preloading — empty .mp3 files silently decode to null buffer (no error)
     this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const soundFiles = ['activation', 'clone_pop', 'ambient', 'kage_bunshin_no_jutsu'];
+    // B10: 'ambient' dropped — it was loaded but never played.
+    const soundFiles = ['activation', 'clone_pop', 'kage_bunshin_no_jutsu'];
     await Promise.all(soundFiles.map(async name => {
       try {
         const res = await fetch(`${assetsBase}/sounds/${name}.mp3`);
@@ -76,6 +282,13 @@ export default class Effects {
       } catch { this._sounds[name] = null; }
     }));
     console.log('[effects] sounds preloaded (empty placeholders produce null buffers — no audio until real mp3s added)');
+
+    // Looping video sprites (screen-composited at the right palm)
+    this._rasengan = new VideoFX(`${assetsBase}/effects/rasengan.mp4`, RASENGAN);
+    this._chidori  = new VideoFX(`${assetsBase}/effects/chidori.mp4`,  CHIDORI);
+    this._fireball = new FireballFX(`${assetsBase}/effects/fireball.mp4`, FIREBALL,
+                                    `${assetsBase}/effects/fireball_burst.mp4`);
+    log.info('effects', 'rasengan + chidori + fireball VideoFX ready');
   }
 
   render(videoEl, segMask, { canvas, jutsuActive }) {
@@ -119,6 +332,11 @@ export default class Effects {
     // Layer 6: main person on top
     if (person) ctx.drawImage(person, 0, 0);
 
+    // Layer 6.5: jutsu orb at the right palm — drawn in front of the person
+    if (this._rasengan?.isActive()) this._drawRasengan(ctx, w, h);
+    if (this._chidori?.isActive())  this._drawChidori(ctx, w, h);
+    if (this._fireball?.isActive()) this._drawFireball(ctx, w, h);
+
     // Screen flash (activation)
     if (this._flashOpacity > 0) {
       ctx.fillStyle = `rgba(255,255,255,${this._flashOpacity})`;
@@ -157,8 +375,9 @@ export default class Effects {
    * Calls onComplete() after all clones have faded (~2450ms).
    * @param {function} onComplete  Called when animation ends — caller should call engine.reset() here
    */
+  /** @returns {boolean} true if a release animation started; false if nothing to release. */
   triggerRelease(onComplete) {
-    if (!this._chakraActive || this._releasePending) return;   // nothing to release, or already releasing
+    if (!this._chakraActive || this._releasePending) return false;  // nothing to release, or already releasing
 
     // Cancel pending clone-pop sounds from initial spawn
     this._cloneTimeouts.forEach(id => clearTimeout(id));
@@ -176,7 +395,18 @@ export default class Effects {
     this._releaseStartTime   = performance.now();
     this._releasePending     = true;
     this._releaseOnComplete  = onComplete;
+    if (PLAY_RELEASE_SOUND) {
+      // Play clone_pop for each visible clone at the moment it starts disappearing.
+      // This reuses _cloneTimeouts so they can be cancelled on re-trigger.
+      this._CLONE_DEFS.forEach(def => {
+        if (!def._notYetSpawned) {
+          const id = setTimeout(() => this._playSound('clone_pop', 0.4), def._disappearDelay);
+          this._cloneTimeouts.push(id);
+        }
+      });
+    }
     console.log('[effects] release triggered — clones fading in reverse order');
+    return true;
   }
 
   _checkReleaseComplete() {
@@ -226,11 +456,16 @@ export default class Effects {
     const now     = performance.now();
     const elapsed = now - this._cloneStartTime;
     const ctx     = this._ctx;
+    const S       = h / 720;              // vertical px offsets authored at 720p
+    const smokeDX = 40 * S;               // smoke L/R offset from clone center
 
     const releaseElapsed = this._releasePending ? now - this._releaseStartTime : -1;
 
     this._CLONE_DEFS.forEach(def => {
       if (elapsed < def.delay) return;
+
+      const cx = w / 2 + def.xFrac * (w / 2);  // screen x of this clone's body center
+      const cy = h / 2 + def.y * S;            // body center y (def.y scaled)
 
       const fadeElapsed = elapsed - def.delay;
       let   opacity     = Math.min(1, fadeElapsed / 300);   // 300ms fade-in per clone
@@ -245,22 +480,22 @@ export default class Effects {
         // Spawn dismissal smoke once when this clone's fade-out begins
         if (!def._releaseSmokeDone && releaseElapsed >= def._disappearDelay) {
           def._releaseSmokeDone = true;
-          this._spawnSmoke(w / 2 + def.x - 40, h / 2 + def.y, def.scale, now);
-          this._spawnSmoke(w / 2 + def.x + 40, h / 2 + def.y, def.scale, now);
+          this._spawnSmoke(cx - smokeDX, cy, def.scale, now);
+          this._spawnSmoke(cx + smokeDX, cy, def.scale, now);
         }
       } else {
         // Normal spawn: spawn smoke once when clone first appears
         if (!def._smokeDone) {
           def._smokeDone = true;
-          this._spawnSmoke(w / 2 + def.x - 40, h / 2 + def.y, def.scale, now);
-          this._spawnSmoke(w / 2 + def.x + 40, h / 2 + def.y, def.scale, now);
+          this._spawnSmoke(cx - smokeDX, cy, def.scale, now);
+          this._spawnSmoke(cx + smokeDX, cy, def.scale, now);
         }
       }
 
       if (opacity <= 0 || !person) return;
       ctx.save();
       ctx.globalAlpha = opacity * 0.85;
-      ctx.translate(w / 2 + def.x, h / 2 + def.y);
+      ctx.translate(cx, cy);
       ctx.scale(def.scale, def.scale);
       ctx.drawImage(person, -w / 2, -h / 2);
       ctx.restore();
@@ -277,6 +512,7 @@ export default class Effects {
   _drawSmokes(now, w, h) {
     const FRAME_MS = 120;
     const ctx = this._ctx;
+    const S   = h / 720;   // keep smoke size proportional across resolutions
     this._activeSmokes = this._activeSmokes.filter(smoke => {
       const frame = Math.floor((now - smoke.startTime) / FRAME_MS);
       if (frame >= 5) return false;  // animation complete — remove
@@ -285,50 +521,148 @@ export default class Effects {
       ctx.save();
       ctx.globalAlpha = 0.8 * (1 - frame / 5);
       ctx.translate(smoke.x, smoke.y);
-      ctx.scale(smoke.scale, smoke.scale);
+      ctx.scale(smoke.scale * S, smoke.scale * S);
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
       ctx.restore();
       return true;
     });
   }
 
+  _drawRasengan(ctx, w, h) {
+    const fx = this._rasengan;
+    const a = fx.anchorPx(w, h);
+    if (!a) return;
+    // Chakra radial glow behind the orb (orange for Naruto, light-purple for Sasuke's Chidori)
+    const r = fx.drawSize(h) * 0.6;
+    if (r > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = fx.isReleasing() ? 0.3 : 0.6;
+      const grad = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, r);
+      grad.addColorStop(0, _hexA(this._chakraColor, 0.55));
+      grad.addColorStop(1, _hexA(this._chakraColor, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    fx.draw(ctx, w, h);
+  }
+
+  _drawChidori(ctx, w, h) {
+    const fx = this._chidori;
+    const a = fx.anchorPx(w, h);
+    if (!a) return;
+    const size = fx.drawSize(h);
+    const dim  = fx.isReleasing() ? 0.4 : 1;
+
+    // Light-purple electric glow behind
+    if (size > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.55 * dim;
+      const grad = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, size * 0.6);
+      grad.addColorStop(0, _hexA(this._chakraColor, 0.6));
+      grad.addColorStop(1, _hexA(this._chakraColor, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, size * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Procedural lightning arcs — regenerate geometry every few frames for a crackle.
+    this._arcFrame++;
+    if (this._arcs.length === 0 || this._arcFrame % CHIDORI.ARC_REGEN_FRAMES === 0) {
+      this._arcs = _genArcs(a.x, a.y, size * 0.7, CHIDORI.ARC_COUNT);
+    }
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';   // additive — arcs glow over the orb
+    ctx.strokeStyle = this._chakraColor;
+    ctx.shadowColor = this._chakraColor;
+    ctx.shadowBlur  = 8;
+    ctx.lineWidth   = Math.max(1, size * 0.012);
+    ctx.globalAlpha = 0.9 * dim;
+    for (const arc of this._arcs) {
+      ctx.beginPath();
+      ctx.moveTo(arc[0].x, arc[0].y);
+      for (let i = 1; i < arc.length; i++) ctx.lineTo(arc[i].x, arc[i].y);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Video orb on top
+    fx.draw(ctx, w, h);
+  }
+
+  _drawFireball(ctx, w, h) {
+    const fx = this._fireball;
+    const a = fx.anchorPx(w, h);
+    if (!a) return;
+    // Ignition burst full-frame flash (behind the jet).
+    fx.drawBurst(ctx, w, h);
+    // Warm glow at the mouth. Fire is intrinsically orange — do NOT tint by chakra
+    // color (Sasuke's chakra is purple; the flame itself stays fire-colored).
+    const size = fx.drawSize(h);
+    if (size > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = fx.isReleasing() ? 0.3 : 0.5;
+      const r = size * 0.35;
+      const grad = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, r);
+      grad.addColorStop(0, _hexA('#ff7a1a', 0.6));
+      grad.addColorStop(1, _hexA('#ff7a1a', 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    fx.draw(ctx, w, h);
+  }
+
   _drawAura(segMask, w, h) {
     if (!segMask) return;
     const ctx = this._ctx;
+    const S   = h / 720;
     ctx.save();
     ctx.shadowColor = this._chakraColor;
-    ctx.shadowBlur  = 20 + 8 * Math.sin(performance.now() / 200);  // pulsing glow
+    ctx.shadowBlur  = (20 + 8 * Math.sin(performance.now() / 200)) * S;  // pulsing glow
     ctx.globalAlpha = 0.6;
     ctx.drawImage(segMask, 0, 0, w, h);
     ctx.restore();
   }
 
   burstParticles(cx, cy) {
+    const S = (this._canvas?.height ?? 720) / 720;   // scale burst to resolution
     for (let i = 0; i < 12; i++) {
       const angle = (i / 12) * Math.PI * 2;
-      const speed = 2 + Math.random() * 3;
+      const speed = (2 + Math.random() * 3) * S;
       this._particles.push({
         x: cx, y: cy,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
+        gravity: 0.1 * S,
         life: 1.0,
-        radius: 4 + Math.random() * 4
+        radius: (4 + Math.random() * 4) * S
       });
     }
   }
 
   _updateParticles(ctx, w, h) {
+    const S = h / 720;
     this._particles = this._particles.filter(p => {
       p.x  += p.vx;
       p.y  += p.vy;
-      p.vy += 0.1;    // gravity
+      p.vy += (p.gravity ?? 0.1 * S);    // gravity
       p.life -= 0.025;
       if (p.life <= 0) return false;
       ctx.save();
       ctx.globalAlpha = p.life;
       ctx.fillStyle   = this._chakraColor;
       ctx.shadowColor = this._chakraColor;
-      ctx.shadowBlur  = 8;
+      ctx.shadowBlur  = 8 * S;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
       ctx.fill();
@@ -381,4 +715,33 @@ export default class Effects {
   }
 
   setChakraColor(hex) { this._chakraColor = hex; }
+}
+
+/** Generate `n` jagged lightning polylines radiating from (cx,cy) out to ~len px. */
+function _genArcs(cx, cy, len, n) {
+  const arcs = [];
+  for (let k = 0; k < n; k++) {
+    const baseAngle = Math.random() * Math.PI * 2;
+    const segs = 5;
+    const pts = [{ x: cx, y: cy }];
+    let x = cx, y = cy;
+    for (let i = 1; i <= segs; i++) {
+      const r = (len / segs) * i;
+      const jitter = (Math.random() - 0.5) * 0.6;   // rad wobble
+      const ang = baseAngle + jitter;
+      x = cx + Math.cos(ang) * r + (Math.random() - 0.5) * len * 0.12;
+      y = cy + Math.sin(ang) * r + (Math.random() - 0.5) * len * 0.12;
+      pts.push({ x, y });
+    }
+    arcs.push(pts);
+  }
+  return arcs;
+}
+
+/** '#RRGGBB' + alpha → 'rgba(r,g,b,a)'. Falls back to the hex if it isn't 6-digit. */
+function _hexA(hex, alpha) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }

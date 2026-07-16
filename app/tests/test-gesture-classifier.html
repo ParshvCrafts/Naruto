@@ -7,14 +7,14 @@
     body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
     .pass { color: #4caf50; }
     .fail { color: #f44336; font-weight: bold; }
-    h1 { color: #9C27B0; }
+    h1 { color: #ddd; }
   </style>
 </head>
 <body>
 <h1>GestureClassifier Tests</h1>
 <pre id="out">Running...</pre>
 <script type="module">
-import GestureClassifier from '../modules/gesture-classifier.js';
+import GestureClassifier, { mouthAspectRatio } from '../modules/gesture-classifier.js';
 
 const gc  = new GestureClassifier();
 const out = [];
@@ -81,6 +81,29 @@ const OPEN = lmks({ 5:{y:0.50},9:{y:0.50},13:{y:0.50},17:{y:0.50},
   const res = gc.detect(null, leftWithX);
   assert('T5: leftHandX=0.25 from wrist landmark', res.leftHandX, 0.25);
 }
+
+// ─── Mouth Aspect Ratio (S17 Fireball trigger) ────────────────────────────────
+// Sparse face-landmark array; only indices 13,14 (inner lips) and 78,308 (corners) matter.
+function face(topY, botY) {
+  const arr = Array.from({ length: 468 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+  arr[13]  = { x: 0.50, y: topY, z: 0 };   // upper inner lip
+  arr[14]  = { x: 0.50, y: botY, z: 0 };   // lower inner lip
+  arr[78]  = { x: 0.40, y: 0.5,  z: 0 };   // left corner
+  arr[308] = { x: 0.60, y: 0.5,  z: 0 };   // right corner  → width = 0.20
+  return arr;
+}
+function approx(desc, actual, expected, eps = 1e-6) {
+  const ok = Math.abs(actual - expected) < eps;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+// closed mouth: gap 0.02 / width 0.20 = 0.10  (< CLOSE_MAR 0.25)
+approx('M1: closed mouth MAR ≈ 0.10', mouthAspectRatio(face(0.49, 0.51)), 0.10, 1e-4);
+// open mouth: gap 0.12 / width 0.20 = 0.60  (> OPEN_MAR 0.40)
+approx('M2: open mouth MAR ≈ 0.60', mouthAspectRatio(face(0.44, 0.56)), 0.60, 1e-4);
+assert('M3: null face → -1', mouthAspectRatio(null), -1);
+assert('M4: short face array → -1', mouthAspectRatio([{x:0,y:0,z:0}]), -1);
 
 out.push(`\n─────\n${passed} passed, ${failed} failed`);
 document.getElementById('out').innerHTML = out.join('\n');

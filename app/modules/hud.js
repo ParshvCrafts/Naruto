@@ -1,4 +1,13 @@
 // hud.js — HUD overlay (layer 7)
+// All px metrics are authored against a 720p backing store and scaled by
+// S = canvas.height / 720 so the HUD keeps the SAME relative size at any camera
+// resolution (S12/§E, fixes B16). Positions are S-scaled or fraction-of-frame.
+import { log } from './log.js';
+import { HUD as HUD_CFG } from './config.js';
+
+const REF_H = 720;  // reference height the raw px metrics were tuned against
+const SIGN_HYSTERESIS = HUD_CFG.SIGN_HYSTERESIS_FRAMES;  // frames before the pill switches sign
+
 const SIGN_NAMES = [
   'Ne (Rat)', 'Ushi (Ox)', 'Tora (Tiger)', 'U (Hare)',
   'Tatsu (Dragon)', 'Mi (Snake)', 'Uma (Horse)', 'Hitsuji (Ram)',
@@ -19,9 +28,54 @@ export default class HUD {
     this._chakraColor = '#ff6b00';
     this._splash      = null;  // { text, startTime }
     this._signImgs    = {};    // classId → HTMLImageElement (loaded lazily)
-    this._imgBase     = '/assets/signs';
+    this._imgBase     = '../assets/signs';  // B3: was '/assets/signs' (absolute → 404 off-root)
+    this._charHint    = false; // B8/§H: show "make fists to choose character" hint
+    this._debug       = log.debugEnabled; // ?debug=1 or 'L' toggle
+    this._debugMode   = '';    // current AppState mode name for the debug strip
+    // Sign-display hysteresis (S13 Task 4): the pill only switches class after
+    // SIGN_HYSTERESIS consecutive frames of a new class → kills single-frame flicker.
+    this._dispClass   = 13;
+    this._dispConf    = 0;
+    this._pendClass   = 13;
+    this._pendCount   = 0;
+    this._rasenganArmed  = false;  // S15 banner state
+    this._rasenganActive = false;
+    this._chidoriReady   = false;  // S16 banner state
+    this._chidoriActive  = false;
+    this._fireballReady  = false;  // S17 banner state
+    this._fireballActive = false;
     this._preloadSignImages();
   }
+
+  /** Rasengan HUD banner state (S15). */
+  setRasenganState(armed, active) { this._rasenganArmed = !!armed; this._rasenganActive = !!active; }
+  /** Chidori HUD banner state (S16). */
+  setChidoriState(ready, active) { this._chidoriReady = !!ready; this._chidoriActive = !!active; }
+  /** Fireball HUD banner state (S17). */
+  setFireballState(ready, active) { this._fireballReady = !!ready; this._fireballActive = !!active; }
+
+  /** Debounce the raw per-frame class into a stable displayed class. */
+  _stabilizeSign(classId, confidence) {
+    if (classId === this._dispClass) {
+      this._dispConf  = confidence;   // same class → just refresh confidence
+      this._pendClass = classId;
+      this._pendCount = 0;
+      return;
+    }
+    if (classId === this._pendClass) this._pendCount++;
+    else { this._pendClass = classId; this._pendCount = 1; }
+    if (this._pendCount >= SIGN_HYSTERESIS) {
+      this._dispClass = classId;
+      this._dispConf  = confidence;
+      this._pendCount = 0;
+    }
+  }
+
+  /** Toggle the "no character selected" hint (B8). White text — never purple on dark. */
+  setCharacterHint(show) { this._charHint = !!show; }
+
+  /** Enable/refresh the debug overlay and current mode label (§F). */
+  setDebugMode(enabled, modeName) { this._debug = !!enabled; if (modeName != null) this._debugMode = modeName; }
 
   /** Kick off background image loading for all sign thumbnails. */
   _preloadSignImages() {
@@ -33,23 +87,128 @@ export default class HUD {
     });
   }
 
-  update(hudCanvas, classId, confidence, seqState) {
+  update(hudCanvas, classId, confidence, seqState, fps) {
     const ctx = hudCanvas.getContext('2d');
-    ctx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+    const w = hudCanvas.width, h = hudCanvas.height;
+    const S = h / REF_H;   // resolution-independent scale for every px metric
+    ctx.clearRect(0, 0, w, h);
 
     // Activation splash — top-right corner
-    this._drawActivationSplash(ctx, hudCanvas.width);
+    this._drawActivationSplash(ctx, w, S);
 
-    // Sign display (top-left)
-    if (classId >= 0 && classId <= 14 && classId !== 13 && Number.isInteger(classId) && confidence >= 0.5) {
-      this._drawSignDisplay(ctx, classId, confidence);
+    // Sign display (top-left) — debounced through hysteresis to kill flicker
+    this._stabilizeSign(Number.isInteger(classId) ? classId : 13, confidence);
+    const dc = this._dispClass, dcf = this._dispConf;
+    if (dc >= 0 && dc <= 14 && dc !== 13 && dcf >= 0.5) {
+      this._drawSignDisplay(ctx, dc, dcf, S);
     }
 
     // Sequence panel (bottom)
-    this._drawSequencePanel(ctx, hudCanvas.width, hudCanvas.height, seqState);
+    this._drawSequencePanel(ctx, w, h, seqState, S);
+
+    // FPS counter (bottom-right)
+    if (fps > 0) this._drawFPS(ctx, w, h, fps, S);
+
+    // Character-selection hint (bottom-center) when nothing is confirmed
+    if (this._charHint) this._drawCharHint(ctx, w, h, S);
+
+    // Jutsu banner (armed/ready prompt or active label) — Rasengan or Chidori
+    if (this._rasenganArmed || this._rasenganActive) {
+      this._drawJutsuBanner(ctx, w, h, S,
+        this._rasenganActive ? 'RASENGAN' : 'RASENGAN ARMED — open right palm',
+        this._rasenganActive, this._rasenganArmed);
+    } else if (this._chidoriReady || this._chidoriActive) {
+      this._drawJutsuBanner(ctx, w, h, S,
+        this._chidoriActive ? 'CHIDORI' : 'CHIDORI READY — open right palm',
+        this._chidoriActive, this._chidoriReady);
+    } else if (this._fireballReady || this._fireballActive) {
+      this._drawJutsuBanner(ctx, w, h, S,
+        this._fireballActive ? 'FIREBALL' : 'FIREBALL READY — open your mouth',
+        this._fireballActive, this._fireballReady);
+    }
+
+    // Debug strip (top-center): state name + last errors (§F)
+    if (this._debug) this._drawDebugStrip(ctx, w, fps, S);
   }
 
-  _drawSignDisplay(ctx, classId, confidence) {
+  _drawJutsuBanner(ctx, w, h, S, msg, active, pulseCond) {
+    ctx.save();
+    ctx.font         = `bold ${15 * S}px monospace`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    const tw = ctx.measureText(msg).width;
+    const px = w / 2, py = h * 0.14;
+    const padX = 16 * S, boxH = 30 * S;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    roundRect(ctx, px - tw / 2 - padX, py - boxH / 2, tw + padX * 2, boxH, 8 * S);
+    ctx.fill();
+    // Chakra border/glow. Pulses gently while armed/ready (not active) to draw the eye.
+    const pulse = pulseCond && !active ? 0.6 + 0.4 * Math.abs(Math.sin(performance.now() / 350)) : 1;
+    ctx.strokeStyle = this._chakraColor;
+    ctx.shadowColor = this._chakraColor;
+    ctx.shadowBlur  = 10 * S * pulse;
+    ctx.lineWidth   = 2 * S;
+    roundRect(ctx, px - tw / 2 - padX, py - boxH / 2, tw + padX * 2, boxH, 8 * S);
+    ctx.stroke();
+    ctx.shadowBlur  = 0;
+    ctx.fillStyle   = '#ffffff';   // white text (hard rule)
+    ctx.fillText(msg, px, py + S);
+    ctx.restore();
+  }
+
+  _drawDebugStrip(ctx, w, fps, S) {
+    const errs  = log.getRecentErrors();
+    const lines = [`STATE: ${this._debugMode || '—'}   FPS: ${fps || 0}`,
+      ...errs.map(e => `⚠ ${e.tag}: ${e.msg}`)];
+    ctx.save();
+    ctx.font         = `${12 * S}px monospace`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'top';
+    const lineH = 16 * S;
+    const boxW  = Math.min(w - 20 * S, 520 * S);
+    const boxH  = lines.length * lineH + 10 * S;
+    const x = w / 2, y = 4 * S;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    roundRect(ctx, x - boxW / 2, y, boxW, boxH, 6 * S);
+    ctx.fill();
+    lines.forEach((ln, i) => {
+      ctx.fillStyle = i === 0 ? '#8fd3ff' : '#ff9b9b';   // status blue / error red (never purple)
+      ctx.fillText(ln, x, y + 5 * S + i * lineH);
+    });
+    ctx.restore();
+  }
+
+  _drawCharHint(ctx, w, h, S) {
+    const msg = 'Make fists with both hands to choose a character';
+    ctx.save();
+    ctx.font         = `bold ${15 * S}px monospace`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'alphabetic';
+    const tw = ctx.measureText(msg).width;
+    const px = w / 2, py = h - 24 * S;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    roundRect(ctx, px - tw / 2 - 14 * S, py - 22 * S, tw + 28 * S, 32 * S, 8 * S);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';   // white — never purple text on dark bg
+    ctx.fillText(msg, px, py);
+    ctx.restore();
+  }
+
+  _drawFPS(ctx, w, h, fps, S) {
+    const color = fps >= 25 ? '#4ade80' : fps >= 15 ? '#facc15' : '#f87171';
+    ctx.save();
+    ctx.font         = `${11 * S}px monospace`;
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle    = 'rgba(0,0,0,0.45)';
+    ctx.fillText(`${fps} fps`, w - 10 * S, h - 12 * S);
+    ctx.fillStyle    = color;
+    ctx.globalAlpha  = 0.7;
+    ctx.fillText(`${fps} fps`, w - 10 * S, h - 12 * S);
+    ctx.restore();
+  }
+
+  _drawSignDisplay(ctx, classId, confidence, S) {
     const name = SIGN_NAMES[classId];
     const pct  = Math.round(confidence * 100);
     const img  = this._signImgs[classId];
@@ -60,67 +219,67 @@ export default class HUD {
     ctx.textBaseline = 'alphabetic';
 
     // Background pill — wider when image is present
-    const pillW = hasImg ? 310 : 260;
+    const pillW = (hasImg ? 390 : 320) * S;
     ctx.fillStyle = 'rgba(0,0,0,0.62)';
-    roundRect(ctx, 10, 6, pillW, 70, 8);
+    roundRect(ctx, 10 * S, 6 * S, pillW, 90 * S, 10 * S);
     ctx.fill();
 
     if (hasImg) {
-      // Sign thumbnail (56×56, clipped to pill interior)
+      // Sign thumbnail (72×72, clipped to pill interior)
       ctx.save();
-      roundRect(ctx, 14, 11, 56, 56, 5);
+      roundRect(ctx, 14 * S, 12 * S, 72 * S, 72 * S, 6 * S);
       ctx.clip();
-      ctx.drawImage(img, 14, 11, 56, 56);
+      ctx.drawImage(img, 14 * S, 12 * S, 72 * S, 72 * S);
       ctx.restore();
 
       // Thin chakra-colored border around thumbnail
-      ctx.strokeStyle = '#ff6b00';
-      ctx.lineWidth   = 1.5;
-      roundRect(ctx, 14, 11, 56, 56, 5);
+      ctx.strokeStyle = this._chakraColor;
+      ctx.lineWidth   = 2 * S;
+      roundRect(ctx, 14 * S, 12 * S, 72 * S, 72 * S, 6 * S);
       ctx.stroke();
 
       // Sign name — offset right of image
-      ctx.font      = 'bold 16px monospace';
+      ctx.font      = `bold ${20 * S}px monospace`;
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(name, 78, 34);
+      ctx.fillText(name, 96 * S, 40 * S);
 
       // Confidence bar background
       ctx.fillStyle = '#333';
-      roundRect(ctx, 78, 46, 196, 10, 4);
+      roundRect(ctx, 96 * S, 54 * S, 258 * S, 12 * S, 5 * S);
       ctx.fill();
 
       // Confidence bar fill
       ctx.fillStyle = `hsl(${confidence * 40}, 100%, 55%)`;
-      roundRect(ctx, 78, 46, Math.round(196 * confidence), 10, 4);
+      roundRect(ctx, 96 * S, 54 * S, Math.round(258 * S * confidence), 12 * S, 5 * S);
       ctx.fill();
 
       // Percentage
-      ctx.font      = '12px monospace';
+      ctx.font      = `${14 * S}px monospace`;
       ctx.fillStyle = '#ccc';
-      ctx.fillText(`${pct}%`, 280, 58);
+      ctx.fillText(`${pct}%`, 362 * S, 70 * S);
     } else {
       // No image — text-only layout
-      ctx.font      = 'bold 18px monospace';
+      ctx.font      = `bold ${22 * S}px monospace`;
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(name, 20, 36);
+      ctx.fillText(name, 20 * S, 42 * S);
 
       ctx.fillStyle = '#333';
-      roundRect(ctx, 20, 50, 210, 10, 4);
+      roundRect(ctx, 20 * S, 56 * S, 262 * S, 12 * S, 5 * S);
       ctx.fill();
 
       ctx.fillStyle = `hsl(${confidence * 40}, 100%, 55%)`;
-      roundRect(ctx, 20, 50, Math.round(210 * confidence), 10, 4);
+      roundRect(ctx, 20 * S, 56 * S, Math.round(262 * S * confidence), 12 * S, 5 * S);
       ctx.fill();
 
-      ctx.font      = '12px monospace';
+      ctx.font      = `${14 * S}px monospace`;
       ctx.fillStyle = '#ccc';
-      ctx.fillText(`${pct}%`, 236, 62);
+      ctx.fillText(`${pct}%`, 290 * S, 72 * S);
     }
 
     ctx.restore();
   }
 
-  _drawActivationSplash(ctx, w) {
+  _drawActivationSplash(ctx, w, S) {
     if (!this._splash) return;
     const elapsed = performance.now() - this._splash.startTime;
     let alpha;
@@ -129,9 +288,9 @@ export default class HUD {
     else if (elapsed < 1600) alpha = 1.0 - (elapsed - 1100) / 500;
     else { this._splash = null; return; }
 
-    const pillW = 220, pillH = 56;
-    const x = w - pillW - 10;
-    const y = 8;
+    const pillW = 220 * S, pillH = 56 * S;
+    const x = w - pillW - 10 * S;
+    const y = 8 * S;
 
     ctx.save();
     ctx.globalAlpha  = alpha;
@@ -140,85 +299,85 @@ export default class HUD {
 
     // Background pill
     ctx.fillStyle = 'rgba(0,0,0,0.62)';
-    roundRect(ctx, x, y, pillW, pillH, 8);
+    roundRect(ctx, x, y, pillW, pillH, 8 * S);
     ctx.fill();
 
     // Glow border — uses current chakra color (matches character theme)
     ctx.strokeStyle = this._chakraColor;
-    ctx.lineWidth   = 1.5;
+    ctx.lineWidth   = 1.5 * S;
     ctx.shadowColor = this._chakraColor;
-    ctx.shadowBlur  = 8;
-    roundRect(ctx, x, y, pillW, pillH, 8);
+    ctx.shadowBlur  = 8 * S;
+    roundRect(ctx, x, y, pillW, pillH, 8 * S);
     ctx.stroke();
     ctx.shadowBlur  = 0;
 
     // Jutsu name
-    ctx.font      = 'bold 13px monospace';
+    ctx.font      = `bold ${13 * S}px monospace`;
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(this._splash.text.toUpperCase(), x + 10, y + 22);
+    ctx.fillText(this._splash.text.toUpperCase(), x + 10 * S, y + 22 * S);
 
     // "JUTSU ACTIVATED" label
-    ctx.font      = '11px monospace';
+    ctx.font      = `${11 * S}px monospace`;
     ctx.fillStyle = '#ccc';
-    ctx.fillText('JUTSU ACTIVATED', x + 10, y + 40);
+    ctx.fillText('JUTSU ACTIVATED', x + 10 * S, y + 40 * S);
 
     ctx.restore();
   }
 
-  _drawSequencePanel(ctx, w, h, seqState) {
+  _drawSequencePanel(ctx, w, h, seqState, S) {
     if (!seqState || !seqState.jutsuName) return;
     const cards  = [...(seqState.completed ?? []), ...(seqState.pending ?? [])];
     if (cards.length === 0) return;
-    const cardW  = 64, cardH = 80, gap = 8;
-    const totalW = cards.length * (cardW + gap) - gap + 40;
+    const cardW  = 64 * S, cardH = 80 * S, gap = 8 * S;
+    const totalW = cards.length * (cardW + gap) - gap + 40 * S;
     const panelX = (w - totalW) / 2;
-    const panelY = h - cardH - 30;
+    const panelY = h - cardH - 30 * S;
 
     ctx.save();
     // Panel background
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    roundRect(ctx, panelX - 10, panelY - 32, totalW + 20, cardH + 44, 10);
+    roundRect(ctx, panelX - 10 * S, panelY - 32 * S, totalW + 20 * S, cardH + 44 * S, 10 * S);
     ctx.fill();
-    ctx.font      = 'bold 12px monospace';
+    ctx.font      = `bold ${12 * S}px monospace`;
     ctx.fillStyle = this._chakraColor;
     ctx.textAlign = 'center';
-    ctx.fillText(seqState.jutsuName.toUpperCase(), w / 2, panelY - 12);
+    ctx.fillText(seqState.jutsuName.toUpperCase(), w / 2, panelY - 12 * S);
 
     cards.forEach((card, i) => {
-      const cx     = panelX + 20 + i * (cardW + gap);
+      const cx     = panelX + 20 * S + i * (cardW + gap);
       const isDone = i < seqState.completed.length;
       const signImg = this._signImgs[card];
       const hasSignImg = signImg && signImg.complete && signImg.naturalWidth > 0;
 
       // Card background
       ctx.fillStyle = isDone ? this._chakraColor + '4D' : 'rgba(20,20,40,0.8)';  // 4D = 30% opacity
-      roundRect(ctx, cx, panelY, cardW, cardH, 6);
+      roundRect(ctx, cx, panelY, cardW, cardH, 6 * S);
       ctx.fill();
 
       // Card border
       ctx.strokeStyle = isDone ? this._chakraColor : '#333';
-      ctx.lineWidth   = isDone ? 2 : 1;
-      roundRect(ctx, cx, panelY, cardW, cardH, 6);
+      ctx.lineWidth   = isDone ? 2 * S : 1 * S;
+      roundRect(ctx, cx, panelY, cardW, cardH, 6 * S);
       ctx.stroke();
 
       // Sign image inside card
       if (hasSignImg) {
-        const imgPad = 6;
+        const imgPad = 6 * S;
         const imgSize = cardW - imgPad * 2;
         ctx.save();
         ctx.globalAlpha = isDone ? 1.0 : 0.35;
-        roundRect(ctx, cx + imgPad, panelY + imgPad, imgSize, imgSize, 4);
+        roundRect(ctx, cx + imgPad, panelY + imgPad, imgSize, imgSize, 4 * S);
         ctx.clip();
         ctx.drawImage(signImg, cx + imgPad, panelY + imgPad, imgSize, imgSize);
         ctx.restore();
       }
 
       // Label below image
-      const labelY = panelY + cardH - 10;
-      ctx.font        = isDone ? 'bold 10px monospace' : '10px monospace';
+      const labelY = panelY + cardH - 10 * S;
+      ctx.font        = isDone ? `bold ${10 * S}px monospace` : `${10 * S}px monospace`;
       ctx.fillStyle   = isDone ? this._chakraColor : '#555';
       ctx.shadowColor = isDone ? this._chakraColor : 'transparent';
-      ctx.shadowBlur  = isDone ? 6 : 0;
+      ctx.shadowBlur  = isDone ? 6 * S : 0;
       ctx.textAlign   = 'center';
       const label = (SIGN_NAMES[card] ?? '???').split(' ')[0];
       ctx.fillText(label, cx + cardW / 2, labelY);

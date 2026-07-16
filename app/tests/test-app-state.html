@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AppState Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+    h1 { color: #ddd; }
+  </style>
+</head>
+<body>
+<h1>AppState Guard-Table Tests</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import AppState, { Mode } from '../modules/app-state.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+// Build a fresh AppState already forced into a given mode.
+function inMode(mode) { const s = new AppState(); s.boot(); s.toMode(mode); return s; }
+
+// ── boot ─────────────────────────────────────────────────────────────────────
+{
+  const s = new AppState();
+  assert('starts in BOOT', s.mode, Mode.BOOT);
+  s.boot();
+  assert('boot() → IDLE', s.mode, Mode.IDLE);
+}
+
+// ── canOpenCarousel: only IDLE and CAROUSEL ───────────────────────────────────
+{
+  const openTrue  = [Mode.IDLE, Mode.CAROUSEL];
+  const openFalse = [Mode.SEQUENCE, Mode.JUTSU_SHADOW_CLONE, Mode.RASENGAN_ARMED,
+    Mode.JUTSU_RASENGAN, Mode.CHIDORI_READY, Mode.JUTSU_CHIDORI, Mode.FIREBALL_READY,
+    Mode.JUTSU_FIREBALL, Mode.RELEASING];
+  openTrue.forEach(m => assert(`canOpenCarousel(${m})=true`, inMode(m).canOpenCarousel(), true));
+  openFalse.forEach(m => assert(`canOpenCarousel(${m})=false`, inMode(m).canOpenCarousel(), false));
+}
+
+// ── canRunEngine: only IDLE and SEQUENCE ──────────────────────────────────────
+{
+  const runTrue  = [Mode.IDLE, Mode.SEQUENCE];
+  const runFalse = [Mode.CAROUSEL, Mode.JUTSU_SHADOW_CLONE, Mode.RASENGAN_ARMED,
+    Mode.JUTSU_RASENGAN, Mode.CHIDORI_READY, Mode.JUTSU_CHIDORI, Mode.FIREBALL_READY,
+    Mode.JUTSU_FIREBALL, Mode.RELEASING];
+  runTrue.forEach(m => assert(`canRunEngine(${m})=true`, inMode(m).canRunEngine(), true));
+  runFalse.forEach(m => assert(`canRunEngine(${m})=false`, inMode(m).canRunEngine(), false));
+}
+
+// ── Carousel open only from IDLE (B6: never mid-sequence/jutsu) ────────────────
+{
+  const s = new AppState(); s.boot();
+  assert('openCarousel from IDLE', s.openCarousel(), true);
+  assert('mode = CAROUSEL', s.mode, Mode.CAROUSEL);
+  assert('re-open while CAROUSEL ok', s.openCarousel(), true);
+  s.closeCarousel();
+  assert('closeCarousel → IDLE', s.mode, Mode.IDLE);
+}
+{
+  const s = inMode(Mode.SEQUENCE);
+  assert('openCarousel blocked in SEQUENCE (B6)', s.openCarousel(), false);
+  assert('still SEQUENCE', s.mode, Mode.SEQUENCE);
+}
+{
+  const s = inMode(Mode.JUTSU_SHADOW_CLONE);
+  assert('openCarousel blocked while clones active', s.openCarousel(), false);
+  assert('still JUTSU_SHADOW_CLONE', s.mode, Mode.JUTSU_SHADOW_CLONE);
+}
+
+// ── Sequence enter/exit ───────────────────────────────────────────────────────
+{
+  const s = new AppState(); s.boot();
+  s.enterSequence('fireball');
+  assert('enterSequence → SEQUENCE', s.mode, Mode.SEQUENCE);
+  assert('seqName tracked', s.seqName, 'fireball');
+  s.exitSequence();
+  assert('exitSequence → IDLE', s.mode, Mode.IDLE);
+  assert('seqName cleared', s.seqName, null);
+}
+
+// ── Shadow clone activation + release lifecycle ───────────────────────────────
+{
+  const s = new AppState(); s.boot();
+  s.activateShadowClone();
+  assert('IDLE → JUTSU_SHADOW_CLONE', s.mode, Mode.JUTSU_SHADOW_CLONE);
+  assert('isJutsuActive', s.isJutsuActive(), true);
+  s.beginRelease();
+  assert('beginRelease → RELEASING', s.mode, Mode.RELEASING);
+  assert('RELEASING not jutsuActive', s.isJutsuActive(), false);
+  s.toIdle();
+  assert('toIdle → IDLE', s.mode, Mode.IDLE);
+}
+
+// ── Guard: activateShadowClone only from IDLE/SEQUENCE ────────────────────────
+{
+  const s = inMode(Mode.CAROUSEL);
+  s.activateShadowClone();
+  assert('activateShadowClone ignored from CAROUSEL', s.mode, Mode.CAROUSEL);
+}
+
+// ── Rasengan flow + guards (S15) ──────────────────────────────────────────────
+{
+  const s = new AppState(); s.boot();
+  s.armRasengan();
+  assert('R1: IDLE → RASENGAN_ARMED', s.mode, Mode.RASENGAN_ARMED);
+  assert('R2: armedElapsed ≥ 0', s.armedElapsed() >= 0, true);
+  s.activateRasengan();
+  assert('R3: ARMED + palm → JUTSU_RASENGAN', s.mode, Mode.JUTSU_RASENGAN);
+  assert('R4: rasengan counts as jutsu-active', s.isJutsuActive(), true);
+  s.beginRelease();
+  assert('R5: → RELEASING', s.mode, Mode.RELEASING);
+  s.toIdle();
+  assert('R6: → IDLE', s.mode, Mode.IDLE);
+}
+{ // Guard: cannot arm from CAROUSEL (release sign inert while carousel open)
+  const s = inMode(Mode.CAROUSEL); s.armRasengan();
+  assert('R7: no arm from CAROUSEL', s.mode, Mode.CAROUSEL);
+}
+{ // Guard: cannot arm while shadow clones active
+  const s = inMode(Mode.JUTSU_SHADOW_CLONE); s.armRasengan();
+  assert('R8: no arm while clones active', s.mode, Mode.JUTSU_SHADOW_CLONE);
+}
+{ // Guard: cannot arm mid-sequence
+  const s = inMode(Mode.SEQUENCE); s.armRasengan();
+  assert('R9: no arm during SEQUENCE', s.mode, Mode.SEQUENCE);
+}
+{ // Disarm (timeout) returns to IDLE
+  const s = new AppState(); s.boot(); s.armRasengan(); s.disarm();
+  assert('R10: disarm → IDLE', s.mode, Mode.IDLE);
+}
+{ // activateRasengan only valid from ARMED
+  const s = new AppState(); s.boot(); s.activateRasengan();
+  assert('R11: no activate without arming', s.mode, Mode.IDLE);
+}
+
+// ── Fireball (S17) ────────────────────────────────────────────────────────────
+{ // fireballReady from IDLE → FIREBALL_READY
+  const s = new AppState(); s.boot(); s.fireballReady();
+  assert('F1: IDLE → FIREBALL_READY', s.mode, Mode.FIREBALL_READY);
+  assert('F1: isReady() true', s.isReady(), true);
+}
+{ // fireballReady from SEQUENCE (sequence resolved to fireball) → READY
+  const s = inMode(Mode.SEQUENCE); s.fireballReady();
+  assert('F2: SEQUENCE → FIREBALL_READY', s.mode, Mode.FIREBALL_READY);
+}
+{ // activateFireball only from FIREBALL_READY
+  const s = new AppState(); s.boot(); s.fireballReady(); s.activateFireball();
+  assert('F3: READY → JUTSU_FIREBALL', s.mode, Mode.JUTSU_FIREBALL);
+  assert('F3: isJutsuActive() true', s.isJutsuActive(), true);
+}
+{ // activateFireball invalid from IDLE (no READY)
+  const s = new AppState(); s.boot(); s.activateFireball();
+  assert('F4: no activate without READY', s.mode, Mode.IDLE);
+}
+{ // READY expires back to IDLE
+  const s = new AppState(); s.boot(); s.fireballReady(); s.expireReady();
+  assert('F5: expireReady → IDLE', s.mode, Mode.IDLE);
+}
+{ // cannot become READY from CAROUSEL (guard)
+  const s = inMode(Mode.CAROUSEL); s.fireballReady();
+  assert('F6: no READY from CAROUSEL', s.mode, Mode.CAROUSEL);
+}
+{ // JUTSU_FIREBALL → RELEASING → IDLE
+  const s = new AppState(); s.boot(); s.fireballReady(); s.activateFireball();
+  s.beginRelease();
+  assert('F7: → RELEASING', s.mode, Mode.RELEASING);
+  s.toIdle();
+  assert('F7: → IDLE', s.mode, Mode.IDLE);
+}
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>

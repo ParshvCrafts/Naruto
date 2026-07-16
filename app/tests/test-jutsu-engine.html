@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JutsuEngine Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+    h1 { color: #ddd; }
+  </style>
+</head>
+<body>
+<h1>JutsuEngine Tests — gating, sequences, cooldown, freeze</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import JutsuEngine from '../modules/jutsu-engine.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+
+// Confirm a single-sign jutsu (feed until active or window exhausted).
+function confirmSingle(e, classId) {
+  for (let i = 0; i < 45; i++) { e.update(classId, 0.99); if (e.isActive()) return true; }
+  return false;
+}
+// Advance one sequence step (feed a class until sequence progress or activation).
+function confirmSeq(e, classId) {
+  const before = e.getSequenceState().completed.length;
+  for (let i = 0; i < 45; i++) {
+    e.update(classId, 0.99);
+    if (e.isActive() || e.getSequenceState().completed.length > before) return true;
+  }
+  return false;
+}
+// Feed a class for a full window WITHOUT expecting progress (to trigger wrong-sign reset).
+function feed(e, classId, n = 45) { for (let i = 0; i < n; i++) e.update(classId, 0.99); }
+
+// ── A: Shadow Clone activates for Naruto ──────────────────────────────────────
+{
+  const e = new JutsuEngine(); let fired = null;
+  e.onActivation('shadowClone', () => fired = 'shadowClone');
+  e.setCharacter('naruto');
+  confirmSingle(e, 12);
+  assert('A: shadowClone fires (naruto)', fired, 'shadowClone');
+  assert('A: engine active', e.isActive(), true);
+}
+
+// ── B: no character → no jutsu ────────────────────────────────────────────────
+{
+  const e = new JutsuEngine(); let fired = null;
+  e.onActivation('shadowClone', () => fired = 'x');
+  e.setCharacter(null);
+  confirmSingle(e, 12);
+  assert('B: null character activates nothing', fired, null);
+  assert('B: engine idle', e.isActive(), false);
+}
+
+// ── C: Sasuke cannot cast Shadow Clone ────────────────────────────────────────
+{
+  const e = new JutsuEngine(); let fired = null;
+  e.onActivation('shadowClone', () => fired = 'x');
+  e.setCharacter('sasuke');
+  confirmSingle(e, 12);
+  assert('C: sasuke cannot shadowClone', fired, null);
+}
+
+// ── D: Fireball full sequence (Sasuke) ────────────────────────────────────────
+{
+  const e = new JutsuEngine(); let fired = null;
+  e.onActivation('fireball', () => fired = 'fireball');
+  e.setCharacter('sasuke');
+  e.registerSequence('fireball', [5, 7, 8, 11, 6, 2]);
+  [5, 7, 8, 11, 6, 2].forEach(c => confirmSeq(e, c));
+  assert('D: fireball activates after 6-sign sequence', fired, 'fireball');
+  assert('D: engine active', e.isActive(), true);
+}
+
+// ── E: anti-cross-seed cooldown blocks a NEW sequence after a wrong-sign reset ─
+{
+  const e = new JutsuEngine();
+  e.setCharacter('sasuke');
+  e.registerSequence('fireball', [5, 7, 8, 11, 6, 2]);
+  e.registerSequence('chidori',  [1, 3, 8]);
+  confirmSeq(e, 5);                       // start fireball (pos0)
+  assert('E: fireball started', e.getSequenceState().jutsuName, 'fireball');
+  feed(e, 1);                            // Ox is wrong for fireball pos1 → reset + cooldown;
+                                          // Ox also starts chidori, but cooldown must block it
+  assert('E: cooldown blocks new sequence (no chidori)', e.getSequenceState().jutsuName, null);
+}
+
+// ── F: a confirmed None window clears the cooldown ────────────────────────────
+{
+  const e = new JutsuEngine();
+  e.setCharacter('sasuke');
+  e.registerSequence('fireball', [5, 7, 8, 11, 6, 2]);
+  e.registerSequence('chidori',  [1, 3, 8]);
+  confirmSeq(e, 5);
+  feed(e, 1);                            // wrong sign → cooldown active
+  for (let i = 0; i < 5; i++) e.update(13, 0);  // None window clears cooldown
+  confirmSeq(e, 1);                      // now chidori may start
+  assert('F: chidori starts after None clears cooldown', e.getSequenceState().jutsuName, 'chidori');
+}
+
+// ── G: freeze/unfreeze does not corrupt an in-progress sequence ───────────────
+{
+  const e = new JutsuEngine();
+  e.setCharacter('sasuke');
+  e.registerSequence('fireball', [5, 7, 8, 11, 6, 2]);
+  confirmSeq(e, 5);
+  e.freezeTimeout();
+  e.unfreezeTimeout();
+  confirmSeq(e, 7);
+  assert('G: sequence survives freeze/unfreeze', e.getSequenceState().completed.length, 2);
+}
+
+// ── H: Chidori sequence in mode:'ready' raises READY, not immediate activation ─
+{
+  const e = new JutsuEngine();
+  e.setCharacter('sasuke');
+  e.registerSequence('chidori', [1, 3, 8], { mode: 'ready' });
+  confirmSeq(e, 1); confirmSeq(e, 3); confirmSeq(e, 8);
+  assert('H: chidori READY (not active)', e.isActive(), false);
+  assert('H: getReady() = chidori', e.getReady(), 'chidori');
+  e.clearReady();
+  assert('H: clearReady() clears it', e.getReady(), null);
+}
+
+// ── I: Naruto cannot build the Chidori (Sasuke-gated) sequence ────────────────
+{
+  const e = new JutsuEngine();
+  e.setCharacter('naruto');
+  e.registerSequence('chidori', [1, 3, 8], { mode: 'ready' });
+  [1, 3, 8].forEach(c => confirmSeq(e, c));
+  assert('I: naruto → no chidori READY', e.getReady(), null);
+  assert('I: naruto → not active', e.isActive(), false);
+}
+
+// ── J: backward-compat — numeric 3rd arg still sets timeout, mode defaults activate ─
+{
+  const e = new JutsuEngine();
+  e.setCharacter('sasuke'); let fired = null;
+  e.onActivation('fireball', () => fired = 'fireball');
+  e.registerSequence('fireball', [5, 7, 8, 11, 6, 2], 6000);
+  [5, 7, 8, 11, 6, 2].forEach(c => confirmSeq(e, c));
+  assert('J: numeric opts still activates', fired, 'fireball');
+}
+
+// ── K: Fireball sequence in mode:'ready' raises READY, not activation (S17) ────
+{
+  const e = new JutsuEngine();
+  e.setCharacter('sasuke');
+  e.registerSequence('fireball', [5, 7, 8, 11, 6, 2], { mode: 'ready' });
+  [5, 7, 8, 11, 6, 2].forEach(c => confirmSeq(e, c));
+  assert('K: fireball READY (not active)', e.isActive(), false);
+  assert('K: getReady() = fireball', e.getReady(), 'fireball');
+}
+
+// ── L: Naruto cannot build the Fireball (Sasuke-gated) sequence ────────────────
+{
+  const e = new JutsuEngine();
+  e.setCharacter('naruto');
+  e.registerSequence('fireball', [5, 7, 8, 11, 6, 2], { mode: 'ready' });
+  [5, 7, 8, 11, 6, 2].forEach(c => confirmSeq(e, c));
+  assert('L: naruto → no fireball READY', e.getReady(), null);
+}
+
+// ── M: Fireball + Chidori ready-sequences coexist; each raises its own READY ───
+//     (both share Monkey(8); prefix from the first sign disambiguates.) ─────────
+{
+  const e = new JutsuEngine();
+  e.setCharacter('sasuke');
+  e.registerSequence('fireball', [5, 7, 8, 11, 6, 2], { mode: 'ready' });
+  e.registerSequence('chidori',  [1, 3, 8],            { mode: 'ready' });
+  // Serpent-start → only fireball is viable; a Monkey later must NOT complete chidori.
+  [5, 7, 8, 11, 6, 2].forEach(c => confirmSeq(e, c));
+  assert('M: Serpent-start yields fireball, not chidori', e.getReady(), 'fireball');
+  e.clearReady();
+  // Fresh chidori path still works.
+  for (let i = 0; i < 5; i++) e.update(13, 0);   // None clears any cooldown
+  [1, 3, 8].forEach(c => confirmSeq(e, c));
+  assert('M: Ox-start yields chidori', e.getReady(), 'chidori');
+}
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>
