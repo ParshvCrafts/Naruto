@@ -340,6 +340,7 @@ async function init() {
         if (++palmOpenFrames >= RASENGAN.PALM_OPEN_FRAMES) {
           state.activateRasengan(); fx.rasenganActivate();
           palmOpenFrames = 0; palmCloseFrames = 0;
+          hud.showActivation('Rasengan');
           log.info('app', 'RASENGAN active');
         }
       } else {
@@ -484,7 +485,7 @@ async function init() {
 
   // Test/debug hook — only under ?debug=1. Lets headless tests read live state.
   if (log.debugEnabled) {
-    window.__naruto = { state, engine, cs, fx, gc, debug, Mode,
+    window.__naruto = { state, engine, cs, fx, gc, hud, debug, Mode,
       char: () => selectedCharacter, seq: () => engine.getSequenceState() };
   }
 

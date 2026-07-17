@@ -8,6 +8,15 @@ import { HUD as HUD_CFG } from './config.js';
 const REF_H = 720;  // reference height the raw px metrics were tuned against
 const SIGN_HYSTERESIS = HUD_CFG.SIGN_HYSTERESIS_FRAMES;  // frames before the pill switches sign
 
+// Consistent activation splash content per jutsu (kanji + romaji). Keyed by the
+// name passed to showActivation(). Unknown names fall back to the raw string.
+const JUTSU_META = {
+  'Shadow Clone Jutsu': { kanji: '影分身', romaji: 'KAGE BUNSHIN' },
+  'Rasengan':           { kanji: '螺旋丸', romaji: 'RASENGAN' },
+  'Chidori':            { kanji: '千鳥',   romaji: 'CHIDORI' },
+  'Fireball':           { kanji: '火遁',   romaji: 'GOKAKYU NO JUTSU' },
+};
+
 const SIGN_NAMES = [
   'Ne (Rat)', 'Ushi (Ox)', 'Tora (Tiger)', 'U (Hare)',
   'Tatsu (Dragon)', 'Mi (Snake)', 'Uma (Horse)', 'Hitsuji (Ram)',
@@ -288,7 +297,10 @@ export default class HUD {
     else if (elapsed < 1600) alpha = 1.0 - (elapsed - 1100) / 500;
     else { this._splash = null; return; }
 
-    const pillW = 220 * S, pillH = 56 * S;
+    const meta   = JUTSU_META[this._splash.text] ??
+                   { kanji: '', romaji: this._splash.text.toUpperCase() };
+
+    const pillW = 260 * S, pillH = 78 * S;
     const x = w - pillW - 10 * S;
     const y = 8 * S;
 
@@ -298,28 +310,38 @@ export default class HUD {
     ctx.textBaseline = 'alphabetic';
 
     // Background pill
-    ctx.fillStyle = 'rgba(0,0,0,0.62)';
-    roundRect(ctx, x, y, pillW, pillH, 8 * S);
+    ctx.fillStyle = 'rgba(0,0,0,0.66)';
+    roundRect(ctx, x, y, pillW, pillH, 10 * S);
     ctx.fill();
 
     // Glow border — uses current chakra color (matches character theme)
     ctx.strokeStyle = this._chakraColor;
-    ctx.lineWidth   = 1.5 * S;
+    ctx.lineWidth   = 1.6 * S;
     ctx.shadowColor = this._chakraColor;
-    ctx.shadowBlur  = 8 * S;
-    roundRect(ctx, x, y, pillW, pillH, 8 * S);
+    ctx.shadowBlur  = 10 * S;
+    roundRect(ctx, x, y, pillW, pillH, 10 * S);
     ctx.stroke();
     ctx.shadowBlur  = 0;
 
-    // Jutsu name
-    ctx.font      = `bold ${13 * S}px monospace`;
+    const tx = x + 14 * S;
+    // Big kanji (chakra-glow, white fill) — the visual anchor
+    if (meta.kanji) {
+      ctx.font        = `bold ${34 * S}px 'Yu Gothic', 'Noto Sans JP', sans-serif`;
+      ctx.fillStyle   = '#ffffff';
+      ctx.shadowColor = this._chakraColor;
+      ctx.shadowBlur  = 12 * S;
+      ctx.fillText(meta.kanji, tx, y + 48 * S);
+      ctx.shadowBlur  = 0;
+    }
+    // Romaji jutsu name — right-aligned block, white
+    ctx.textAlign = 'right';
+    ctx.font      = `bold ${15 * S}px monospace`;
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(this._splash.text.toUpperCase(), x + 10 * S, y + 22 * S);
-
-    // "JUTSU ACTIVATED" label
-    ctx.font      = `${11 * S}px monospace`;
-    ctx.fillStyle = '#ccc';
-    ctx.fillText('JUTSU ACTIVATED', x + 10 * S, y + 40 * S);
+    ctx.fillText(meta.romaji, x + pillW - 14 * S, y + 34 * S);
+    // "JUTSU" label under the romaji
+    ctx.font      = `${10 * S}px monospace`;
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('JUTSU ACTIVATED', x + pillW - 14 * S, y + 52 * S);
 
     ctx.restore();
   }
