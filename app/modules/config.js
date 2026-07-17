@@ -147,6 +147,22 @@ export const FIREBALL = Object.freeze({
   BURST_ALPHA:  0.35,  // peak alpha of the ignition flash
 });
 
+// ─── Sharingan procedural eyes (Sasuke, S18) ─────────────────────────────────
+// Drawn on eye-contour landmarks (Holistic has no iris refinement by default), so
+// the iris center/size is approximated from the eye corners + lids. Flag-gated:
+// flip ENABLED false if it ever looks uncanny (user-mandated quality gate).
+export const SHARINGAN = Object.freeze({
+  ENABLED:     true,
+  IRIS_FRAC:   0.58,   // iris radius = IRIS_FRAC * half eye-width
+  ALPHA:       0.92,
+  SPIN:        0.035,  // tomoe rotation rad/frame
+  BLINK_RATIO: 0.14,   // eye-open (height/width) below this = blinking → skip that eye
+  EMA:         0.5,    // center smoothing
+  IRIS_COLOR:  '#C1121C', // sharingan red
+  RING_COLOR:  '#6d0d0d', // dark outer ring
+  SCALE_IN_MS: 300,    // grow-in when Sasuke is confirmed
+});
+
 // ─── Camera ─────────────────────────────────────────────────────────────────────
 // PREF picks the requested capture resolution. Drop to '720' if 1080p can't hold
 // FPS ≥ 20 on the target machine (HUD FPS counter is the gauge). Backing-store

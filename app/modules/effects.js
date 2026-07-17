@@ -1,6 +1,6 @@
 // effects.js — Canvas rendering (layers 1-7)
 import { log } from './log.js';
-import { RASENGAN, CHIDORI, FIREBALL } from './config.js';
+import { RASENGAN, CHIDORI, FIREBALL, SHARINGAN } from './config.js';
 
 /**
  * VideoFX — a looping video sprite composited with `screen` blend at a hand anchor.
@@ -223,6 +223,35 @@ export default class Effects {
     this._fireball = null;
     this._arcs     = [];   // procedural lightning polylines (chidori)
     this._arcFrame = 0;
+
+    // Sharingan procedural eyes (S18)
+    this._face          = null;   // latest Holistic faceLandmarks
+    this._sharinganOn   = false;  // Sasuke selected → draw eyes
+    this._sharinganAt   = 0;      // activation time (scale-in)
+    this._tomoeAngle    = 0;      // spinning tomoe rotation
+    this._eyeC          = { r: null, l: null };  // EMA-smoothed eye centers
+  }
+
+  // ── Sharingan (procedural eyes) API (S18) ────────────────────────────────────
+  setFace(faceLandmarks) { this._face = faceLandmarks || null; }
+  setSharingan(on) {
+    on = !!on;
+    if (on && !this._sharinganOn) this._sharinganAt = performance.now();
+    if (!on) this._eyeC = { r: null, l: null };  // reset smoothing when off
+    this._sharinganOn = on;
+  }
+  isSharinganOn() { return this._sharinganOn; }
+
+  /**
+   * Whether the person cutout (selfie-segmentation mask) is needed THIS frame.
+   * Only Shadow Clone composites effects BEHIND the person (clones/smoke/aura); every
+   * other state shows the raw webcam (Layer 1) with orbs drawn in front, so the mask
+   * is unnecessary. Gating segmentation on this (S18 perf) skips an expensive
+   * per-frame ML pass in IDLE / carousel / Rasengan / Chidori / Fireball / Sharingan.
+   */
+  needsSegmentation() {
+    return this._chakraActive || this._releasePending ||
+           this._cloneStartTime !== null || this._activeSmokes.length > 0;
   }
 
   // ── Rasengan (VideoFX) API ─────────────────────────────────────────────────
@@ -336,6 +365,9 @@ export default class Effects {
     if (this._rasengan?.isActive()) this._drawRasengan(ctx, w, h);
     if (this._chidori?.isActive())  this._drawChidori(ctx, w, h);
     if (this._fireball?.isActive()) this._drawFireball(ctx, w, h);
+
+    // Sharingan eyes — on top of the person's face, follows head via landmarks.
+    if (SHARINGAN.ENABLED && this._sharinganOn && this._face) this._drawSharingan(ctx, w, h);
 
     // Screen flash (activation)
     if (this._flashOpacity > 0) {
@@ -622,6 +654,75 @@ export default class Effects {
     fx.draw(ctx, w, h);
   }
 
+  // ── Sharingan procedural eyes (S18) ──────────────────────────────────────────
+  // Eye-contour landmark sets (MediaPipe FaceMesh 468). Center/size approximated
+  // from corners + lids since Holistic exposes no iris refinement by default.
+  _drawSharingan(ctx, w, h) {
+    const f = this._face;
+    // [outerCorner, innerCorner, upperLid, lowerLid]
+    const R_EYE = [33, 133, 159, 145];
+    const L_EYE = [362, 263, 386, 374];
+    if (f.length <= 386) return;
+
+    const scaleIn = Math.min(1, (performance.now() - this._sharinganAt) / SHARINGAN.SCALE_IN_MS);
+    this._tomoeAngle += SHARINGAN.SPIN;
+
+    for (const [key, idx] of [['r', R_EYE], ['l', L_EYE]]) {
+      const [c1, c2, up, lo] = idx.map(i => f[i]);
+      if (!c1 || !c2 || !up || !lo) continue;
+      const cx = (c1.x + c2.x) / 2, cy = (c1.y + c2.y) / 2;
+      const eyeW = Math.hypot(c1.x - c2.x, c1.y - c2.y);
+      const eyeH = Math.hypot(up.x - lo.x, up.y - lo.y);
+      if (eyeW <= 0 || eyeH / eyeW < SHARINGAN.BLINK_RATIO) continue;  // blinking → skip
+
+      // EMA-smooth the center (normalized space) to kill landmark jitter.
+      const prev = this._eyeC[key];
+      const sx = prev ? prev.x + SHARINGAN.EMA * (cx - prev.x) : cx;
+      const sy = prev ? prev.y + SHARINGAN.EMA * (cy - prev.y) : cy;
+      this._eyeC[key] = { x: sx, y: sy };
+
+      const px = sx * w, py = sy * h;
+      const irisR = SHARINGAN.IRIS_FRAC * (eyeW * 0.5) * w * scaleIn;
+      const rx = eyeW * 0.5 * w, ry = Math.max(eyeH * 0.5 * h, irisR * 0.35);
+      if (irisR < 1) continue;
+
+      ctx.save();
+      ctx.globalAlpha = SHARINGAN.ALPHA;
+      // Clip to the eye opening so the iris stays within the lids (blink-natural).
+      ctx.beginPath();
+      ctx.ellipse(px, py, rx, ry, 0, 0, Math.PI * 2);
+      ctx.clip();
+
+      // Iris disc (red radial gradient)
+      const grad = ctx.createRadialGradient(px, py, irisR * 0.2, px, py, irisR);
+      grad.addColorStop(0, '#e0402e');
+      grad.addColorStop(0.7, SHARINGAN.IRIS_COLOR);
+      grad.addColorStop(1, SHARINGAN.RING_COLOR);
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(px, py, irisR, 0, Math.PI * 2); ctx.fill();
+
+      // Pupil (small, so the tomoe read as separate commas around it)
+      ctx.fillStyle = '#0a0a0a';
+      ctx.beginPath(); ctx.arc(px, py, irisR * 0.2, 0, Math.PI * 2); ctx.fill();
+
+      // Spinning tomoe (3, evenly spaced, orbiting well outside the pupil)
+      ctx.fillStyle = '#0a0a0a';
+      for (let i = 0; i < 3; i++) {
+        const a = this._tomoeAngle + i * (Math.PI * 2 / 3);
+        const ox = px + Math.cos(a) * irisR * 0.6;
+        const oy = py + Math.sin(a) * irisR * 0.6;
+        _tomoe(ctx, ox, oy, irisR * 0.14, a + Math.PI / 2);
+      }
+
+      // Dark outer ring at the iris edge — clipped, so it never bleeds onto skin.
+      ctx.strokeStyle = SHARINGAN.RING_COLOR;
+      ctx.lineWidth = Math.max(1, irisR * 0.09);
+      ctx.beginPath(); ctx.arc(px, py, irisR * 0.97, 0, Math.PI * 2); ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
   _drawAura(segMask, w, h) {
     if (!segMask) return;
     const ctx = this._ctx;
@@ -744,4 +845,22 @@ function _hexA(hex, alpha) {
   if (!m) return hex;
   const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// A single Sharingan tomoe (comma): round head + curved tapering tail.
+// Drawn at (cx,cy), head radius r, rotated by `rot`. Uses current fillStyle.
+function _tomoe(ctx, cx, cy, r, rot) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(rot);
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);                 // head
+  ctx.fill();
+  ctx.beginPath();                                   // tail curling off the head
+  ctx.moveTo(0, -r);
+  ctx.quadraticCurveTo(r * 2.6, r * 0.1, r * 0.15, r * 2.2);
+  ctx.quadraticCurveTo(r * 0.5, r * 0.4, 0, r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }

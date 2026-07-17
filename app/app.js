@@ -201,15 +201,22 @@ async function init() {
     }
 
     // Fire-and-forget selfie segmentation (1-frame lag acceptable).
+    // S18 perf: only run it when the person cutout is actually needed (Shadow Clone
+    // composites effects behind the person). Otherwise Layer 1 (raw webcam) already
+    // shows the person and orbs draw in front — so skip the expensive per-frame pass.
     // B11: guard against send() rejection so a segmentation failure doesn't wedge
     // segPending=true forever (which would freeze the person cutout silently).
-    if (!segPending && !segErrored) {
-      segPending = true;
-      Promise.resolve(segmentation.send({ image: video })).catch(err => {
-        segPending = false;
-        segErrored = true;  // stop hammering a broken segmenter; render falls back to no-mask
-        log.error('seg', `selfie segmentation failed: ${err?.message ?? err}`);
-      });
+    if (fx.needsSegmentation()) {
+      if (!segPending && !segErrored) {
+        segPending = true;
+        Promise.resolve(segmentation.send({ image: video })).catch(err => {
+          segPending = false;
+          segErrored = true;  // stop hammering a broken segmenter; render falls back to no-mask
+          log.error('seg', `selfie segmentation failed: ${err?.message ?? err}`);
+        });
+      }
+    } else {
+      latestMask = null;  // no cutout needed → raw webcam shows through, no stale mask
     }
 
     // ── Gesture classification (runs every frame, independent of MLP) ──────────────
@@ -455,6 +462,9 @@ async function init() {
     hud.setRasenganState(state.is(Mode.RASENGAN_ARMED), fx.isRasenganActive());
     hud.setChidoriState(state.is(Mode.CHIDORI_READY), fx.isChidoriActive());
     hud.setFireballState(state.is(Mode.FIREBALL_READY), fx.isFireballActive());
+    // Sharingan eyes — Sasuke only, follows face landmarks (S18).
+    fx.setFace(results.faceLandmarks);
+    fx.setSharingan(selectedCharacter === 'sasuke');
     fx.render(video, latestMask, { canvas, jutsuActive: engine.isActive() });
     hud.update(hudCanvas, classId, confidence, engine.getSequenceState(), _fps);
     cs.render(hudCanvas.getContext('2d'), canvas.width, canvas.height);
