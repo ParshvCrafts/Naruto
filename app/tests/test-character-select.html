@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CharacterSelect Tests (S14)</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+    h1 { color: #ddd; }
+  </style>
+</head>
+<body>
+<h1>CharacterSelect — open debounce + palm paging + confirm</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import CharacterSelect from '../modules/character-select.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+const G = (o = {}) => ({ isDualFist:false, isLeftFist:false, isLeftTwoFingers:false,
+  isLeftOpenPalm:false, isRightThumbUp:false, isLeftThumbUp:false, leftHandX:0.5, ...o });
+const fist = G({ isDualFist:true });
+const none = G();
+const palm = x => G({ isLeftOpenPalm:true, leftHandX:x });
+
+// ── Open debounce (4 consecutive dual-fist frames) ────────────────────────────
+{
+  const cs = new CharacterSelect();
+  for (let i = 0; i < 10; i++) cs.update(i % 2 ? fist : none);  // flickering fist
+  assert('D1: flickering fist never opens', cs.isActive(), false);
+}
+{
+  const cs = new CharacterSelect();
+  cs.update(fist); cs.update(fist); cs.update(fist);
+  assert('D2: 3 consecutive frames → still closed', cs.isActive(), false);
+  cs.update(fist);
+  assert('D3: 4th consecutive frame → opens', cs.isActive(), true);
+}
+
+// ── Palm-swipe paging (unit: _updatePalmSwipe bypasses the open-delay gate) ────
+{
+  const cs = new CharacterSelect();
+  cs._targetScrollX = 0; cs._scrollX = 0; cs._emaX = null; cs._pageCooldownUntil = 0;
+  cs._updatePalmSwipe(palm(0.50), 1000);      // seed anchor at 0.50
+  cs._updatePalmSwipe(palm(0.90), 1016);      // sharp move right → page +1
+  assert('P1: swipe right pages 0→1', cs._targetScrollX, 1);
+}
+{
+  const cs = new CharacterSelect();
+  cs._targetScrollX = 1; cs._scrollX = 1; cs._emaX = null; cs._pageCooldownUntil = 0;
+  cs._updatePalmSwipe(palm(0.50), 2000);
+  cs._updatePalmSwipe(palm(0.10), 2016);      // sharp move left → page -1
+  assert('P2: swipe left pages 1→0', cs._targetScrollX, 0);
+}
+{
+  const cs = new CharacterSelect();
+  cs._targetScrollX = 0; cs._emaX = null; cs._pageCooldownUntil = 0;
+  cs._updatePalmSwipe(palm(0.50), 3000);
+  cs._updatePalmSwipe(palm(0.90), 3016);      // page → 1, sets cooldown
+  cs._updatePalmSwipe(palm(0.90), 3020);      // within cooldown → no double page
+  assert('P3: cooldown blocks double page', cs._targetScrollX, 1);
+}
+
+// ── Hold-still → confirm ──────────────────────────────────────────────────────
+{
+  const cs = new CharacterSelect();
+  cs._targetScrollX = 0; cs._scrollX = 0; cs._emaX = null; cs._pageCooldownUntil = 0;
+  cs._updatePalmSwipe(palm(0.50), 4000);      // seed
+  cs._updatePalmSwipe(palm(0.50), 4020);      // held still → confirming starts
+  assert('C1: still palm begins confirming', cs._confirming, true);
+  cs._updatePalmSwipe(palm(0.50), 4020 + 601);// held past CONFIRM_MS → locks
+  assert('C2: held 600ms locks character', cs._locked, true);
+  assert('C3: confirmed char is set', cs.getSelectedCharacter() !== null, true);
+  assert('C4: lock burst timestamp set', cs._lockBurst > 0, true);
+}
+
+// ── Movement cancels an in-progress confirm ───────────────────────────────────
+{
+  const cs = new CharacterSelect();
+  cs._targetScrollX = 0; cs._emaX = null; cs._pageCooldownUntil = 0;
+  cs._updatePalmSwipe(palm(0.50), 5000);
+  cs._updatePalmSwipe(palm(0.50), 5020);      // confirming
+  assert('C5: confirming before move', cs._confirming, true);
+  cs._updatePalmSwipe(palm(0.90), 5040);      // sharp move → pages + cancels confirm
+  assert('C6: movement cancels confirm', cs._confirming, false);
+}
+
+// ── Fist-swipe paging + open-palm confirm (default mode; distinct gestures) ────
+const lfist = x => G({ isLeftFist:true, leftHandX:x });
+{
+  const cs = new CharacterSelect();
+  cs._updateFistSwipe(lfist(0.50), 1000);       // seed anchor
+  cs._updateFistSwipe(lfist(0.90), 1016);       // move right → page +1
+  assert('FS1: fist right pages 0→1', cs._targetScrollX, 1);
+}
+{
+  const cs = new CharacterSelect(); cs._targetScrollX = 1; cs._scrollX = 1;
+  cs._updateFistSwipe(lfist(0.50), 2000);
+  cs._updateFistSwipe(lfist(0.10), 2016);       // move left → page -1
+  assert('FS2: fist left pages 1→0', cs._targetScrollX, 0);
+}
+{ // KEY regression: a moving fist must NEVER accrue a confirm (the reported bug)
+  localStorage.removeItem('selectedCharacter');  // isolate from prior confirm-tests' persistence (B8)
+  const cs = new CharacterSelect();
+  cs._updateFistSwipe(lfist(0.50), 3000);
+  cs._updateFistSwipe(lfist(0.90), 3016);
+  cs._updateFistSwipe(lfist(0.50), 3400);
+  assert('FS3: fist swipe never confirms', cs._confirming, false);
+  assert('FS3: fist swipe selects nothing', cs.getSelectedCharacter(), null);
+}
+{ // Open palm held → selects the current card
+  const cs = new CharacterSelect();
+  cs._updateFistSwipe(palm(0.50), 4000);       // palm → confirming begins
+  assert('FS4: palm begins confirming', cs._confirming, true);
+  cs._updateFistSwipe(palm(0.50), 4000 + 601); // held past CONFIRM_MS
+  assert('FS4: palm selects a character', cs.getSelectedCharacter() !== null, true);
+}
+{ // Switching from fist-swipe to open palm confirms (no stale swipe state)
+  const cs = new CharacterSelect();
+  cs._updateFistSwipe(lfist(0.90), 5000);
+  cs._updateFistSwipe(palm(0.50), 5100);       // palm → resets swipe, starts confirm
+  assert('FS5: palm after fist starts confirm', cs._confirming, true);
+}
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>

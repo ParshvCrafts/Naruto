@@ -58,7 +58,7 @@ export const CAROUSEL = Object.freeze({
   // ── S14 open-debounce + paging ─────────────────────────────────────────────
   OPEN_FRAMES:        4,      // consecutive dual-fist frames required to open (kills flicker re-trigger)
   RETRIGGER_LOCK_MS:  800,    // ignore re-open/restart for this long after opening
-  SCROLL_MODE:        'palm', // 'palm' (open-palm swipe, stable) | 'twofinger' (legacy delta)
+  SCROLL_MODE:        'fist', // 'fist' (fist-move swipe, open-palm select — distinct gestures) | 'palm' (open-palm does both) | 'twofinger' (legacy delta)
   EMA_ALPHA:          0.35,   // smoothing on hand x
   PAGE_DX:            0.08,   // smoothed-x displacement from anchor to page ±1
   PAGE_COOLDOWN_MS:   300,    // min gap between pages
