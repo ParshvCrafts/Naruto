@@ -77,11 +77,12 @@ export const GESTURE = Object.freeze({
 // Hysteresis prevents talking/flicker from firing: open must exceed OPEN_MAR, close
 // must drop below CLOSE_MAR. Frame holds debounce further.
 export const MOUTH = Object.freeze({
-  OPEN_MAR:     0.40,  // MAR above this = mouth open
-  CLOSE_MAR:    0.25,  // MAR below this = mouth closed (gap = hysteresis band)
-  OPEN_FRAMES:  5,     // consecutive open frames in FIREBALL_READY → activate (~167ms)
-  CLOSE_FRAMES: 15,    // consecutive closed frames while active → release (~500ms)
-  MAX_MS:       6000,  // hard cap on a single breath (safety auto-release)
+  OPEN_MAR:          0.40,  // MAR above this = mouth open
+  CLOSE_MAR:         0.25,  // MAR below this = mouth closed (gap = hysteresis band)
+  OPEN_FRAMES:       5,     // consecutive open frames in FIREBALL_READY → activate (~167ms)
+  CLOSE_FRAMES:      15,    // consecutive closed frames while active → release (~500ms)
+  MAX_MS:            6000,  // hard cap on a single breath (safety auto-release)
+  READY_TIMEOUT_MS:  10000, // FIREBALL_READY expires to IDLE if the mouth never opens
 });
 
 // ─── Release sign detector ─────────────────────────────────────────────────────

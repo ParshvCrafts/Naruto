@@ -403,7 +403,7 @@ async function init() {
     const mouthClosed = mar >= 0 ? mar < MOUTH.CLOSE_MAR : true;  // face lost → treat as closed
 
     if (state.is(Mode.FIREBALL_READY)) {
-      if (state.readyElapsed() > CHIDORI.READY_TIMEOUT_MS) {
+      if (state.readyElapsed() > MOUTH.READY_TIMEOUT_MS) {
         state.expireReady(); fireballOpenFrames = 0; log.info('app', 'fireball READY expired');
       } else if (mouthOpen) {
         if (++fireballOpenFrames >= MOUTH.OPEN_FRAMES) {
