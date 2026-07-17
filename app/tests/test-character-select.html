@@ -25,7 +25,8 @@ function assert(desc, actual, expected) {
     (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
 }
 const G = (o = {}) => ({ isDualFist:false, isLeftFist:false, isLeftTwoFingers:false,
-  isLeftOpenPalm:false, isRightThumbUp:false, isLeftThumbUp:false, leftHandX:0.5, ...o });
+  isLeftIndexPoint:false, isLeftOpenPalm:false, isRightThumbUp:false, isLeftThumbUp:false,
+  leftHandX:0.5, ...o });
 const fist = G({ isDualFist:true });
 const none = G();
 const palm = x => G({ isLeftOpenPalm:true, leftHandX:x });
@@ -93,40 +94,40 @@ const palm = x => G({ isLeftOpenPalm:true, leftHandX:x });
 }
 
 // ── Fist-swipe paging + open-palm confirm (default mode; distinct gestures) ────
-const lfist = x => G({ isLeftFist:true, leftHandX:x });
+const lindex = x => G({ isLeftIndexPoint:true, leftHandX:x });
 {
   const cs = new CharacterSelect();
-  cs._updateFistSwipe(lfist(0.50), 1000);       // seed anchor
-  cs._updateFistSwipe(lfist(0.90), 1016);       // move right → page +1
-  assert('FS1: fist right pages 0→1', cs._targetScrollX, 1);
+  cs._updateIndexSwipe(lindex(0.50), 1000);       // seed anchor
+  cs._updateIndexSwipe(lindex(0.90), 1016);       // move right → page +1
+  assert('FS1: index right pages 0→1', cs._targetScrollX, 1);
 }
 {
   const cs = new CharacterSelect(); cs._targetScrollX = 1; cs._scrollX = 1;
-  cs._updateFistSwipe(lfist(0.50), 2000);
-  cs._updateFistSwipe(lfist(0.10), 2016);       // move left → page -1
-  assert('FS2: fist left pages 1→0', cs._targetScrollX, 0);
+  cs._updateIndexSwipe(lindex(0.50), 2000);
+  cs._updateIndexSwipe(lindex(0.10), 2016);       // move left → page -1
+  assert('FS2: index left pages 1→0', cs._targetScrollX, 0);
 }
 { // KEY regression: a moving fist must NEVER accrue a confirm (the reported bug)
   localStorage.removeItem('selectedCharacter');  // isolate from prior confirm-tests' persistence (B8)
   const cs = new CharacterSelect();
-  cs._updateFistSwipe(lfist(0.50), 3000);
-  cs._updateFistSwipe(lfist(0.90), 3016);
-  cs._updateFistSwipe(lfist(0.50), 3400);
-  assert('FS3: fist swipe never confirms', cs._confirming, false);
-  assert('FS3: fist swipe selects nothing', cs.getSelectedCharacter(), null);
+  cs._updateIndexSwipe(lindex(0.50), 3000);
+  cs._updateIndexSwipe(lindex(0.90), 3016);
+  cs._updateIndexSwipe(lindex(0.50), 3400);
+  assert('FS3: index swipe never confirms', cs._confirming, false);
+  assert('FS3: index swipe selects nothing', cs.getSelectedCharacter(), null);
 }
 { // Open palm held → selects the current card
   const cs = new CharacterSelect();
-  cs._updateFistSwipe(palm(0.50), 4000);       // palm → confirming begins
+  cs._updateIndexSwipe(palm(0.50), 4000);       // palm → confirming begins
   assert('FS4: palm begins confirming', cs._confirming, true);
-  cs._updateFistSwipe(palm(0.50), 4000 + 601); // held past CONFIRM_MS
+  cs._updateIndexSwipe(palm(0.50), 4000 + 601); // held past CONFIRM_MS
   assert('FS4: palm selects a character', cs.getSelectedCharacter() !== null, true);
 }
 { // Switching from fist-swipe to open palm confirms (no stale swipe state)
   const cs = new CharacterSelect();
-  cs._updateFistSwipe(lfist(0.90), 5000);
-  cs._updateFistSwipe(palm(0.50), 5100);       // palm → resets swipe, starts confirm
-  assert('FS5: palm after fist starts confirm', cs._confirming, true);
+  cs._updateIndexSwipe(lindex(0.90), 5000);
+  cs._updateIndexSwipe(palm(0.50), 5100);       // palm → resets swipe, starts confirm
+  assert('FS5: palm after index starts confirm', cs._confirming, true);
 }
 
 out.push(`\n─────\n${passed} passed, ${failed} failed`);

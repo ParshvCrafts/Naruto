@@ -51,14 +51,14 @@ export const CAROUSEL = Object.freeze({
   REOPEN_COOLDOWN:    1200,
   LERP_FACTOR:        0.28,  // visual settle toward target page
   SCROLL_SENSITIVITY: 5.0,   // (legacy twofinger continuous mapping)
-  CARD_W:             160,
-  CARD_H:             284,   // 9:16 of 160
-  INACTIVE_SCALE:     0.65,
-  CARD_GAP:           50,
+  CARD_W:             300,   // authored at 720p (S = h/720); big, premium cards
+  CARD_H:             534,   // 9:16 of 300
+  INACTIVE_SCALE:     0.68,
+  CARD_GAP:           70,
   // ── S14 open-debounce + paging ─────────────────────────────────────────────
   OPEN_FRAMES:        4,      // consecutive dual-fist frames required to open (kills flicker re-trigger)
   RETRIGGER_LOCK_MS:  800,    // ignore re-open/restart for this long after opening
-  SCROLL_MODE:        'fist', // 'fist' (fist-move swipe, open-palm select — distinct gestures) | 'palm' (open-palm does both) | 'twofinger' (legacy delta)
+  SCROLL_MODE:        'index', // 'index' (index-finger point + move to browse, open-palm select — distinct gestures) | 'palm' (open-palm does both) | 'twofinger' (legacy delta)
   EMA_ALPHA:          0.35,   // smoothing on hand x
   PAGE_DX:            0.08,   // smoothed-x displacement from anchor to page ±1
   PAGE_COOLDOWN_MS:   300,    // min gap between pages

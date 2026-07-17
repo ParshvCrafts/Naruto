@@ -34,6 +34,7 @@ export default class GestureClassifier {
     const rightFist       = rightLmks && rightLmks.length >= 21 ? _isFist(rightLmks)         : false;
     const leftFist        = leftLmks  && leftLmks.length  >= 21 ? _isFist(leftLmks)          : false;
     const leftTwoFingers  = leftLmks  && leftLmks.length  >= 21 ? _isTwoFingers(leftLmks)    : false;
+    const leftIndexPoint  = leftLmks  && leftLmks.length  >= 21 ? _isIndexPoint(leftLmks)    : false;
     const leftOpen        = leftLmks  && leftLmks.length  >= 21 ? _isOpenPalm(leftLmks)      : false;
     const rightThumbUp    = rightLmks && rightLmks.length >= 21 ? _isThumbUp(rightLmks)      : false;
     const leftThumbUp     = leftLmks  && leftLmks.length  >= 21 ? _isThumbUp(leftLmks)       : false;
@@ -49,6 +50,7 @@ export default class GestureClassifier {
       isDualFist:       rightFist && leftFist,
       isLeftFist:       leftFist,
       isLeftTwoFingers: leftTwoFingers,
+      isLeftIndexPoint: leftIndexPoint,   // index extended, other 3 fingers curled (carousel swipe)
       isLeftOpenPalm:   leftOpen,
       isRightThumbUp:   rightThumbUp,
       isLeftThumbUp:    leftThumbUp,
@@ -73,6 +75,15 @@ function _isFist(lmks) {
 function _isOpenPalm(lmks) {
   // All 4 fingers must be extended: tip.y < mcp.y - EXTEND_MARGIN
   return TIP_IDX.every((tipIdx, i) => lmks[tipIdx].y < lmks[MCP_IDX[i]].y - EXTEND_MARGIN);
+}
+
+function _isIndexPoint(lmks) {
+  // Index (8) extended above its MCP; middle/ring/pinky curled below theirs.
+  const indexUp   = lmks[8].y  < lmks[5].y  - EXTEND_MARGIN;
+  const middleDn  = lmks[12].y > lmks[9].y  + CURL_MARGIN;
+  const ringDn    = lmks[16].y > lmks[13].y + CURL_MARGIN;
+  const pinkyDn   = lmks[20].y > lmks[17].y + CURL_MARGIN;
+  return indexUp && middleDn && ringDn && pinkyDn;
 }
 
 function _isTwoFingers(lmks) {

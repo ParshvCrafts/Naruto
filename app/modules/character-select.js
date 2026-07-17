@@ -189,9 +189,9 @@ export default class CharacterSelect {
         // Gesture delay: ignore scroll/confirm while the menu is still opening
         const menuAge = now - this._openedAt;
         if (menuAge >= GESTURE_DELAY_MS && !this._locked) {
-          if      (SCROLL_MODE === 'fist') this._updateFistSwipe(g, now);
-          else if (SCROLL_MODE === 'palm') this._updatePalmSwipe(g, now);
-          else                             this._updateTwoFingerScroll(g, now);
+          if      (SCROLL_MODE === 'index') this._updateIndexSwipe(g, now);
+          else if (SCROLL_MODE === 'palm')  this._updatePalmSwipe(g, now);
+          else                              this._updateTwoFingerScroll(g, now);
         } else if (this._locked) {
           this._confirming = false;
         }
@@ -263,12 +263,12 @@ export default class CharacterSelect {
   }
 
   /**
-   * Fist-swipe paging + open-palm confirm (default). Distinct gestures so swiping
-   * never triggers a select: a moving LEFT FIST pages ±1; an OPEN PALM held still
-   * confirms. Fixes the palm-mode conflict where opening the palm to swipe would
-   * immediately select the current card.
+   * Index-point swipe paging + open-palm confirm (default). Distinct gestures so
+   * swiping never triggers a select: a moving LEFT INDEX FINGER (point) pages ±1;
+   * an OPEN PALM held still confirms. Fixes the palm-mode conflict where opening
+   * the palm to swipe would immediately select the current card.
    */
-  _updateFistSwipe(g, now) {
+  _updateIndexSwipe(g, now) {
     // Confirm branch — open palm held selects the current card (no movement needed).
     if (g.isLeftOpenPalm) {
       this._emaX = this._lastEmaX = null;    // drop swipe smoothing while confirming
@@ -284,12 +284,12 @@ export default class CharacterSelect {
     }
     this._confirming = false;  // not an open palm → never accrue a confirm
 
-    // Swipe branch — a moving left fist pages between characters.
-    if (!g.isLeftFist) {
+    // Swipe branch — a moving pointed index finger pages between characters.
+    if (!g.isLeftIndexPoint) {
       this._emaX = this._lastEmaX = null;    // hand relaxed → reset smoothing/anchor
       return;
     }
-    if (this._emaX === null) {               // rising edge of fist → seed EMA + anchor
+    if (this._emaX === null) {               // rising edge of point → seed EMA + anchor
       this._emaX = this._lastEmaX = g.leftHandX;
       this._pageAnchorX = g.leftHandX;
       return;
@@ -464,8 +464,8 @@ export default class CharacterSelect {
     ctx.fillText('SELECT CHARACTER', w / 2, titleY);
     ctx.font      = `${13 * S}px monospace`;
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    const hint = SCROLL_MODE === 'fist'
-      ? '[Fist] move left/right to browse  •  [Open palm] hold to select  •  [Thumb up] exit'
+    const hint = SCROLL_MODE === 'index'
+      ? '[Point index] move left/right to browse  •  [Open palm] hold to select  •  [Thumb up] exit'
       : SCROLL_MODE === 'palm'
       ? '[Open palm] swipe left/right  •  [Hold palm still] select  •  [Thumb up] exit'
       : '[Index+Middle] scroll  •  [Open palm] select  •  [Thumb up] confirm & exit';
