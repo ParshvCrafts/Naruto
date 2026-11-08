@@ -6,28 +6,40 @@
 //
 // Web Speech API notes:
 //  - Requires Chrome/Edge (or any browser with SpeechRecognition support).
-//  - Works on localhost (http://localhost:8080) — no HTTPS required for localhost.
+//  - Works on localhost (http://localhost:8765) — no HTTPS required for localhost.
 //  - Browser will request microphone permission on first use.
 
-// ─── Geometric thresholds ────────────────────────────────────────────────────────
-
-// Index and middle fingertips must be this far ABOVE their MCPs (in y, y↓ is down).
-const RELEASE_EXTEND_MARGIN = 0.05;
-
-// Ring and pinky fingertips must be this far BELOW their MCPs (curled in).
-const RELEASE_CURL_MARGIN = 0.02;
+// ─── Geometric thresholds (centralized in config.js — RELEASE) ─────────────────────
+import { RELEASE } from './config.js';
+const RELEASE_EXTEND_MARGIN = RELEASE.EXTEND_MARGIN;  // index+middle above MCP (y↓)
+const RELEASE_CURL_MARGIN   = RELEASE.CURL_MARGIN;    // ring+pinky below MCP
+const RELEASE_MAX_WRIST_JOIN = RELEASE.MAX_WRIST_JOIN; // hands closer than this = joined seal, not release
 
 // ─── Hand sign detector ─────────────────────────────────────────────────────────
 
 /**
  * Returns true if leftLmks shows the Release sign:
- * index + middle up, ring + pinky curled.
+ * index + middle up, ring + pinky curled — and the right hand is NOT also showing
+ * an extended index finger (which would indicate a two-handed sign like Ram or Tiger).
  *
- * @param {Array<{x,y,z}>|null} leftLmks  21 MediaPipe left-hand landmarks, or null
+ * @param {Array<{x,y,z}>|null} leftLmks   21 MediaPipe left-hand landmarks, or null
+ * @param {Array<{x,y,z}>|null} rightLmks  21 MediaPipe right-hand landmarks, or null
  * @returns {boolean}
  */
-export function isReleaseSign(leftLmks) {
+export function isReleaseSign(leftLmks, rightLmks = null) {
   if (!leftLmks || leftLmks.length < 21) return false;
+
+  // Release is a left-hand-only sign. If the right hand is also present, two guards
+  // reject a forming two-handed seal (Tiger/Ram) — this is the B5 mitigation:
+  if (rightLmks && rightLmks.length >= 21) {
+    // (a) right index extended → clearly a joined seal, not Release.
+    const rIndexUp = rightLmks[8].y < rightLmks[5].y - RELEASE_EXTEND_MARGIN;
+    if (rIndexUp) return false;
+    // (b) hands joined (wrists close) → a two-handed seal is forming even if the
+    //     right index hasn't fully extended yet (half-Tiger transition frames).
+    const wristGap = Math.hypot(leftLmks[0].x - rightLmks[0].x, leftLmks[0].y - rightLmks[0].y);
+    if (wristGap < RELEASE_MAX_WRIST_JOIN) return false;
+  }
 
   // Index (tip=8, mcp=5) and middle (tip=12, mcp=9) must be extended upward
   const indexUp  = leftLmks[8].y  < leftLmks[5].y  - RELEASE_EXTEND_MARGIN;

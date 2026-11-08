@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Release + HUD Hysteresis Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+    h1 { color: #ddd; }
+  </style>
+</head>
+<body>
+<h1>Release-sign guard (B5) + HUD sign hysteresis (S13)</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import { isReleaseSign } from '../modules/release-detector.js';
+import HUD from '../modules/hud.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+/** 21-landmark array at (0.5,0.5,0) with overrides. */
+function lmks(o = {}) {
+  const a = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+  for (const [i, v] of Object.entries(o)) Object.assign(a[+i], v);
+  return a;
+}
+// Left hand in Release pose: index(8)+middle(12) up, ring(16)+pinky(20) down; wrist at (0.30,0.60).
+function releaseLeft() {
+  return lmks({ 0:{x:0.30,y:0.60}, 5:{y:0.50},9:{y:0.50},13:{y:0.50},17:{y:0.50},
+                8:{y:0.40},12:{y:0.40}, 16:{y:0.60},20:{y:0.60} });
+}
+// Right hand, index NOT extended (5 and 8 level); wrist position via arg.
+function rightIdle(wx) { return lmks({ 0:{x:wx,y:0.60}, 5:{y:0.50},8:{y:0.50} }); }
+// Right hand with index extended up.
+function rightIndexUp(wx) { return lmks({ 0:{x:wx,y:0.60}, 5:{y:0.50},8:{y:0.40} }); }
+
+// ── isReleaseSign ────────────────────────────────────────────────────────────
+assert('R1: left release pose, right absent → true',        isReleaseSign(releaseLeft(), null), true);
+assert('R2: right index up (joined seal) → false',          isReleaseSign(releaseLeft(), rightIndexUp(0.32)), false);
+assert('R3: right idle but wrists joined (<0.12) → false',  isReleaseSign(releaseLeft(), rightIdle(0.32)), false);
+assert('R4: right idle and wrists far apart → true',        isReleaseSign(releaseLeft(), rightIdle(0.75)), true);
+assert('R5: non-release left hand → false',                 isReleaseSign(lmks(), null), false);
+
+// ── HUD sign hysteresis (3 consecutive frames to switch) ─────────────────────
+{
+  const hud = new HUD();
+  // starts displaying None(13)
+  assert('H1: initial displayed class = 13', hud._dispClass, 13);
+  hud._stabilizeSign(2, 0.9);
+  assert('H2: 1 frame of Tiger → still 13',  hud._dispClass, 13);
+  hud._stabilizeSign(2, 0.9);
+  assert('H3: 2 frames → still 13',          hud._dispClass, 13);
+  hud._stabilizeSign(2, 0.9);
+  assert('H4: 3 frames → switches to 2',     hud._dispClass, 2);
+  // A single stray frame must NOT flip the display
+  hud._stabilizeSign(4, 0.9);
+  hud._stabilizeSign(4, 0.9);
+  assert('H5: 2 frames of Dragon → still 2', hud._dispClass, 2);
+  // interruption resets the pending counter
+  hud._stabilizeSign(5, 0.9);
+  hud._stabilizeSign(4, 0.9);
+  hud._stabilizeSign(4, 0.9);
+  assert('H6: broken run → still 2',         hud._dispClass, 2);
+  hud._stabilizeSign(4, 0.9);
+  assert('H7: 3 clean frames → switches to 4', hud._dispClass, 4);
+}
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>

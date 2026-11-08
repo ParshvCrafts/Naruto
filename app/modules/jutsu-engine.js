@@ -1,32 +1,52 @@
 // jutsu-engine.js — Sign confirmation + jutsu activation
+import { ENGINE } from './config.js';
+
 export default class JutsuEngine {
   constructor() {
-    this._window      = new Array(45).fill(13);  // sliding window, init to None
+    this._window      = new Array(ENGINE.WINDOW_SIZE).fill(ENGINE.NONE_CLASS);  // sliding window, init to None
     this._windowIdx   = 0;
     this._handlers    = {};                       // jutsuName → callback
     this._active      = false;
     this._activeTimer = null;
-    this._SHADOW_CLONE_CLASS = 12;
-    this._NONE_CLASS         = 13;
-    this._CONFIRM_THRESHOLD  = 0.70;
-    this._CONF_MIN           = 0.90;  // minimum per-frame confidence to accept a prediction
+    this._SHADOW_CLONE_CLASS = ENGINE.SHADOW_CLONE_CLASS;
+    this._NONE_CLASS         = ENGINE.NONE_CLASS;
+    this._CONFIRM_THRESHOLD  = ENGINE.CONFIRM_THRESHOLD;
+    this._CONF_MIN           = ENGINE.CONF_MIN;  // minimum per-frame confidence to accept a prediction
 
     // Sequence jutsu support
-    this._sequences   = {};     // jutsuName → { sequence: int[], timeoutMs: number }
-    this._seqBuffer   = [];     // confirmed signs so far in active sequence
-    this._seqLastTime = 0;      // timestamp of last confirmed sign
-    this._seqTimeout  = 5000;   // ms before incomplete sequence resets
-    this._seqActive   = null;   // jutsuName currently in progress
-    this._character   = null;   // 'naruto' | 'sasuke' | null — gates jutsu activation
-    this._activeJutsu = null;   // name of currently active jutsu, or null
+    this._sequences     = {};     // jutsuName → { sequence: int[], timeoutMs: number }
+    this._seqBuffer     = [];     // confirmed signs so far in active sequence
+    this._seqLastTime   = 0;      // timestamp of last confirmed sign
+    this._seqTimeout    = ENGINE.SEQ_TIMEOUT_MS;  // ms before incomplete sequence resets
+    this._seqActive     = null;   // jutsuName currently in progress
+    this._seqCooldownUntil = 0;   // anti-cross-seed: no NEW sequence may start before this (B6/§A)
+    this._frozenAt      = 0;      // >0 while sequence-timeout clock is paused (carousel open)
+    this._ready         = null;   // name of a mode:'ready' sequence awaiting its activation gesture
+    this._readyAt       = 0;
+    this._character     = null;   // 'naruto' | 'sasuke' | null — gates jutsu activation
+    this._activeJutsu   = null;   // name of currently active jutsu, or null
   }
 
   onActivation(jutsuName, callback) {
     this._handlers[jutsuName] = callback;
   }
 
-  registerSequence(jutsuName, sequence, timeoutMs = 5000) {
-    this._sequences[jutsuName] = { sequence, timeoutMs };
+  /**
+   * @param {string} jutsuName
+   * @param {number[]} sequence
+   * @param {number|{timeoutMs?:number, mode?:'activate'|'ready'}} [opts]
+   *   mode 'activate' (default) fires onActivation immediately on completion;
+   *   mode 'ready' instead raises a READY signal (getReady) so the caller can gate
+   *   activation on a further gesture (Chidori right palm, Fireball mouth). A plain
+   *   number is treated as timeoutMs for backward compatibility.
+   */
+  registerSequence(jutsuName, sequence, opts = {}) {
+    const o = typeof opts === 'number' ? { timeoutMs: opts } : opts;
+    this._sequences[jutsuName] = {
+      sequence,
+      timeoutMs: o.timeoutMs ?? 5000,
+      mode:      o.mode ?? 'activate',
+    };
   }
 
   /** Gate jutsu to character. null disables all jutsu (selection pending). */
@@ -38,6 +58,8 @@ export default class JutsuEngine {
     if (this._active) return;
     if (classId === this._NONE_CLASS || confidence < this._CONF_MIN) {
       this._window.fill(this._NONE_CLASS);  // reset on None/low confidence
+      // A confirmed None window clears the anti-cross-seed cooldown (§A).
+      if (!this._seqActive) this._seqCooldownUntil = 0;
       return;
     }
     this._window[this._windowIdx] = classId;
@@ -73,6 +95,11 @@ export default class JutsuEngine {
     }
     this._seqLastTime = now;
 
+    // Anti-cross-seed (§A): while cooling down, no NEW sequence may start.
+    // A sequence already in progress (seqActive) is unaffected.
+    const startingNew = !this._seqActive;
+    if (startingNew && now < this._seqCooldownUntil) return;
+
     // Find matching sequence prefix (lock to active sequence once started)
     for (const [name, def] of Object.entries(this._sequences)) {
       if (this._seqActive && name !== this._seqActive) continue;
@@ -86,17 +113,25 @@ export default class JutsuEngine {
         if (this._seqBuffer.length === def.sequence.length) {
           this._seqBuffer = [];
           this._seqActive = null;
-          this._activate(name);
+          if (def.mode === 'ready') {
+            // Signal READY; the app gates final activation on a further gesture.
+            this._ready   = name;
+            this._readyAt = performance.now();
+            console.log(`[engine] READY: ${name}`);
+          } else {
+            this._activate(name);
+          }
         }
         return;
       }
     }
 
-    // Wrong sign mid-sequence → reset
+    // Wrong sign mid-sequence → reset + start anti-cross-seed cooldown (§A)
     if (this._seqActive) {
       console.log('[engine] wrong sign — sequence reset');
       this._seqBuffer = [];
       this._seqActive = null;
+      this._seqCooldownUntil = now + ENGINE.SEQ_COOLDOWN_MS;
     }
   }
 
@@ -110,12 +145,35 @@ export default class JutsuEngine {
     // Shadow Clone persists until manual Release gesture — no auto-reset.
     // All other jutsu auto-reset after 8s as a safety net.
     if (jutsuName !== 'shadowClone') {
-      this._activeTimer = setTimeout(() => { this.reset(); }, 8000);
+      this._activeTimer = setTimeout(() => { this.reset(); }, ENGINE.AUTO_RESET_MS);
     }
   }
 
   isActive()      { return this._active; }
   getActiveJutsu() { return this._activeJutsu; }
+
+  /** @returns {string|null} name of a sequence that completed in mode:'ready', or null. */
+  getReady() { return this._ready; }
+  /** Consume the READY signal (call once the app has transitioned to the READY state). */
+  clearReady() { this._ready = null; this._readyAt = 0; }
+
+  /**
+   * Pause the sequence-timeout clock (call when carousel opens — §A freeze, B6).
+   * While frozen the caller must also skip engine.update() entirely.
+   */
+  freezeTimeout() {
+    if (!this._frozenAt) this._frozenAt = performance.now();
+  }
+
+  /** Resume the clock, crediting the frozen interval so mid-sequence progress survives. */
+  unfreezeTimeout() {
+    if (this._frozenAt) {
+      const elapsed = performance.now() - this._frozenAt;
+      this._seqLastTime += elapsed;
+      this._seqCooldownUntil += elapsed;
+      this._frozenAt = 0;
+    }
+  }
 
   getSequenceState() {
     if (!this._seqActive) return { jutsuName: null, completed: [], pending: [] };
@@ -139,6 +197,10 @@ export default class JutsuEngine {
     this._seqBuffer   = [];
     this._seqActive   = null;
     this._seqLastTime = 0;
+    this._seqCooldownUntil = 0;
+    this._frozenAt    = 0;
+    this._ready       = null;
+    this._readyAt     = 0;
     this._window.fill(this._NONE_CLASS);
     this._windowIdx = 0;
     console.log('[engine] reset');

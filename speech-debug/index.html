@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Speech Debug — Naruto Jutsu</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a;
+      color: #eee;
+      font-family: 'Courier New', monospace;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    h1 { font-size: 20px; color: #ff6b00; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 4px; }
+    .subtitle { font-size: 12px; color: #555; margin-bottom: 24px; letter-spacing: 1px; }
+    .controls { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; }
+    button {
+      padding: 10px 24px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      border: none;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    #btn-start { background: #ff6b00; color: #000; }
+    #btn-start:disabled { opacity: 0.4; cursor: default; }
+    #btn-stop { background: #333; color: #aaa; }
+    #btn-stop:disabled { opacity: 0.4; cursor: default; }
+    .mic-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #555; }
+    .mic-dot { width: 10px; height: 10px; border-radius: 50%; background: #333; transition: background 0.3s; }
+    .mic-dot.active { background: #4caf50; animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(76,175,80,0.6); }
+      50%       { box-shadow: 0 0 0 6px rgba(76,175,80,0); }
+    }
+    .release-banner {
+      background: #ff6b00;
+      color: #000;
+      text-align: center;
+      font-size: 18px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      padding: 14px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.1s;
+    }
+    .release-banner.show { opacity: 1; }
+    .panel {
+      background: #111;
+      border: 1px solid #1e1e1e;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .panel-title { font-size: 11px; color: #ff6b00; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; }
+    #live-transcript { font-size: 20px; color: #fff; min-height: 30px; line-height: 1.5; word-break: break-word; }
+    #live-interim { font-size: 14px; color: #555; min-height: 20px; margin-top: 6px; font-style: italic; }
+    .keyword { color: #ff6b00; font-weight: bold; text-decoration: underline; }
+    #error-msg { color: #e53935; font-size: 13px; min-height: 18px; margin-top: 8px; }
+    #history-list { list-style: none; max-height: 300px; overflow-y: auto; }
+    #history-list li { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #1a1a1a; font-size: 13px; align-items: baseline; }
+    #history-list li:last-child { border-bottom: none; }
+    .ts { color: #444; font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+    .phrase { color: #bbb; word-break: break-word; }
+    .phrase.has-kw { color: #fff; font-weight: bold; }
+    .instructions { font-size: 12px; color: #444; line-height: 1.9; }
+    .instructions b { color: #ff6b00; }
+  </style>
+</head>
+<body>
+  <h1>Speech Debug</h1>
+  <p class="subtitle">Naruto Jutsu — Web Speech API Verification Tool · http://localhost:8080/speech-debug/</p>
+
+  <div class="release-banner" id="release-banner">⚡ RELEASE DETECTED! ⚡</div>
+
+  <div class="controls">
+    <button id="btn-start">▶ START LISTENING</button>
+    <button id="btn-stop" disabled>■ STOP</button>
+    <div class="mic-status">
+      <div class="mic-dot" id="mic-dot"></div>
+      <span id="mic-label">Microphone off</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Live Transcript (Final)</div>
+    <div id="live-transcript">—</div>
+    <div id="live-interim"></div>
+    <div id="error-msg"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Phrase History (last 20 final results)</div>
+    <ul id="history-list"><li style="color:#333;font-size:12px">No phrases yet — start listening and speak.</li></ul>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Instructions</div>
+    <p class="instructions">
+      1. Click <b>▶ START LISTENING</b> — browser will request microphone permission.<br>
+      2. Speak clearly into your microphone. Recognized text appears above in real-time.<br>
+      3. Say <b>"Release"</b> — the word highlights orange and a banner flashes.<br>
+      4. This page tests the same Web Speech API used in the Naruto Jutsu app.<br>
+      5. If speech is not recognized: check mic permissions in browser settings.<br>
+      6. Supported browsers: <b>Chrome</b> and <b>Edge</b> only (not Firefox or Safari).<br>
+      7. Must be served via HTTP — open at <b>http://localhost:8080/speech-debug/</b>
+    </p>
+  </div>
+
+  <script>
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let rec = null;
+    let listening = false;
+    let bannerTimer = null;
+    const history = [];
+
+    const btnStart    = document.getElementById('btn-start');
+    const btnStop     = document.getElementById('btn-stop');
+    const micDot      = document.getElementById('mic-dot');
+    const micLabel    = document.getElementById('mic-label');
+    const liveEl      = document.getElementById('live-transcript');
+    const interimEl   = document.getElementById('live-interim');
+    const errorEl     = document.getElementById('error-msg');
+    const historyList = document.getElementById('history-list');
+    const banner      = document.getElementById('release-banner');
+
+    if (!SR) {
+      errorEl.textContent = 'Web Speech API not supported. Use Chrome or Edge on localhost.';
+      btnStart.disabled = true;
+    }
+
+    function highlight(text) {
+      // Bold+orange the word "release" wherever it appears
+      return text.replace(/\brelease\b/gi, '<span class="keyword">$&</span>');
+    }
+
+    function setMicActive(active) {
+      micDot.classList.toggle('active', active);
+      micLabel.textContent = active ? 'Microphone active — speak now' : 'Microphone off';
+    }
+
+    function flashBanner() {
+      clearTimeout(bannerTimer);
+      banner.classList.add('show');
+      bannerTimer = setTimeout(() => banner.classList.remove('show'), 1600);
+    }
+
+    function addHistory(text) {
+      const ts = new Date().toLocaleTimeString();
+      const hasKw = /\brelease\b/i.test(text);
+      history.unshift({ ts, text, hasKw });
+      if (history.length > 20) history.pop();
+      historyList.innerHTML = history.map(({ ts, text, hasKw }) =>
+        `<li>
+          <span class="ts">${ts}</span>
+          <span class="phrase${hasKw ? ' has-kw' : ''}">${highlight(text)}</span>
+        </li>`
+      ).join('');
+    }
+
+    function startRecognition() {
+      if (!listening) return;
+      rec = new SR();
+      rec.continuous      = true;
+      rec.interimResults  = true;
+      rec.lang            = 'en-US';
+      rec.maxAlternatives = 1;
+
+      rec.onresult = e => {
+        errorEl.textContent = '';
+        let finalText = '', interimText = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finalText += t;
+          else interimText += t;
+        }
+        if (finalText.trim()) {
+          liveEl.innerHTML = highlight(finalText.trim());
+          interimEl.textContent = '';
+          addHistory(finalText.trim());
+          if (/\brelease\b/i.test(finalText)) flashBanner();
+        } else if (interimText.trim()) {
+          interimEl.innerHTML = '▸ ' + highlight(interimText.trim());
+        }
+      };
+
+      rec.onend = () => {
+        // Auto-restart while listening (browser caps single sessions at ~60s)
+        if (listening) setTimeout(startRecognition, 200);
+      };
+
+      rec.onerror = e => {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          errorEl.textContent = 'Microphone permission denied. Allow mic access in browser settings and reload.';
+          stopListening();
+          return;
+        }
+        if (e.error !== 'no-speech' && e.error !== 'aborted') {
+          errorEl.textContent = `Recognition error: ${e.error} — retrying...`;
+        }
+        if (listening) setTimeout(startRecognition, 500);
+      };
+
+      try {
+        rec.start();
+      } catch (err) {
+        if (listening) setTimeout(startRecognition, 1000);
+      }
+    }
+
+    function startListening() {
+      if (!SR) return;
+      listening = true;
+      setMicActive(true);
+      btnStart.disabled = true;
+      btnStop.disabled = false;
+      errorEl.textContent = '';
+      liveEl.textContent = '—';
+      interimEl.textContent = '';
+      startRecognition();
+    }
+
+    function stopListening() {
+      listening = false;
+      setMicActive(false);
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+      interimEl.textContent = '';
+      if (rec) { try { rec.abort(); } catch (_) {} rec = null; }
+    }
+
+    btnStart.addEventListener('click', startListening);
+    btnStop.addEventListener('click', stopListening);
+  </script>
+</body>
+</html>

@@ -3,35 +3,139 @@ html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
 
 .app-container {
   display: flex;
-  flex-direction: column;
+  justify-content: center;
   align-items: center;
+  width: 100vw;
   height: 100vh;
 }
+
 .canvas-wrap {
   position: relative;
-  width: 640px;
-  height: 480px;
-  flex-shrink: 0;
+  /* --ar = real camera width/height, set from JS on loadedmetadata (S12/§E).
+     The wrapper letterboxes to the true camera aspect, so canvas px ↔ CSS px is a
+     pure uniform scale — no crop, no stretch. Defaults to 16:9 before metadata. */
+  --ar: calc(16 / 9);
+  width:  min(100vw, calc(100vh * var(--ar)));
+  height: min(100vh, calc(100vw / var(--ar)));
 }
+
+/* Cinematic vignette — frames the edges without clipping content */
+.canvas-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 180px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  z-index: 3;
+}
+
 video, #canvas, #hud-canvas {
-  position: absolute; top: 0; left: 0;
+  position: absolute;
+  top: 0; left: 0;
   width: 100%; height: 100%;
 }
-video       { z-index: 0; }
+/* Wrapper aspect now equals camera aspect exactly → 100%×100% fills with no crop.
+   object-fit:contain is a harmless safety net if a device reports odd dims. */
+video       { z-index: 0; object-fit: contain; }
 #canvas     { z-index: 1; }
 #hud-canvas { z-index: 2; pointer-events: none; }
 
+/* ── Controls bar ────────────────────────────────────────────────────────── */
 .controls {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 12px;
-  background: rgba(0,0,0,0.7);
-  width: 640px;
+  gap: 14px;
+  padding: 10px 20px;
+  background: rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid rgba(255, 107, 0, 0.22);
   color: #ccc;
+  transition: opacity 0.4s ease, transform 0.4s ease;
 }
+
+/* Demo mode: slide controls off-screen for clean recording */
+body.demo-mode .controls {
+  opacity: 0;
+  transform: translateY(100%);
+  pointer-events: none;
+}
+
+/* Primary button (record) */
 .ctrl-btn {
-  background: #ff6b00; color: #fff; border: none;
-  padding: 8px 16px; border-radius: 6px; cursor: pointer;
+  background: #ff6b00;
+  color: #fff;
+  border: none;
+  padding: 7px 15px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: background 0.18s;
+  white-space: nowrap;
 }
-.status-text { color: #aaa; font-size: 0.9rem; font-family: monospace; }
+.ctrl-btn:hover { background: #e55d00; }
+
+/* Ghost button (demo, fullscreen) */
+.ctrl-btn-ghost {
+  background: transparent;
+  color: #aaa;
+  border: 1px solid rgba(255, 107, 0, 0.32);
+  padding: 7px 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+  white-space: nowrap;
+}
+.ctrl-btn-ghost:hover {
+  background: rgba(255, 107, 0, 0.12);
+  color: #fff;
+  border-color: rgba(255, 107, 0, 0.6);
+}
+
+.ctrl-label {
+  color: #bbb;
+  font-size: 0.84rem;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ctrl-select {
+  background: rgba(12, 12, 20, 0.88);
+  color: #ddd;
+  border: 1px solid rgba(255, 107, 0, 0.28);
+  padding: 5px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.status-text {
+  color: #555;
+  font-size: 0.8rem;
+  font-family: monospace;
+  margin-left: auto;
+}
+
+/* Tiny exit hint visible only in demo mode, bottom-right */
+body.demo-mode #demo-hint {
+  display: block;
+}
+#demo-hint {
+  display: none;
+  position: fixed;
+  bottom: 10px;
+  right: 14px;
+  z-index: 20;
+  font-family: monospace;
+  font-size: 0.68rem;
+  color: rgba(255, 107, 0, 0.38);
+  pointer-events: none;
+  letter-spacing: 0.5px;
+}

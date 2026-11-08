@@ -206,8 +206,8 @@ function onResults(results) {
       { color: '#00ff88', fillColor: '#00ff8866', radius: 3 });
   }
   if (results.leftHandLandmarks) {
-    drawConnectors(ctx, results.leftHandLandmarks, HAND_CONNECTIONS,
-      { color: '#ff8800', lineWidth: 2 });
+    drawConnectors(ctx, results.leftHandLandmarks, HAND_CONNECTIONS_SAFE,
+      { color: '#ff8800', lineWidth: 2 });  // B15: was raw HAND_CONNECTIONS → throws if CDN global missing
     drawLandmarks(ctx, results.leftHandLandmarks,
       { color: '#ff8800', fillColor: '#ff880066', radius: 3 });
   }
