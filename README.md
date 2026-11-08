@@ -65,13 +65,19 @@ The experience is deliberately authentic to the source material — you actually
 
 ### Features
 
+- **Character Selection Carousel** — choose between Naruto and Sasuke; each alters the jutsu arsenal, visual theme, and chakra color.
 - **In-browser training** — collect samples, train a 14-class neural network, and export the model, all inside the browser with no server required
 - **Real-time inference** — 30fps MediaPipe Holistic landmark detection → TF.js softmax classification
-- **Sign confirmation** — 45-frame sliding window (1.5s at 30fps); requires >70% window fill at >0.85 confidence to prevent flickering false positives
-- **Shadow Clone Jutsu** — hold the Kage Bunshin sign for 1.5s: 16 clones appear from smoke, chakra aura glows, screen flashes white
-- **Fireball Jutsu (stub)** — weave Snake→Ram→Monkey→Boar→Horse→Tiger in sequence (5s window); activation fires with the placeholder effect
-- **Selfie segmentation** — your body is composited on top of the clone layer so you appear *in front of* your own duplicates
-- **Chakra color picker** — 5 preset aura colors (Blue, Red Nine-Tails, Purple Rinnegan, Green Medical, Gold), persisted to localStorage
+- **Sign confirmation** — 45-frame sliding window (1.5s at 30fps) requiring >70% window fill at ≥0.90 per-frame confidence to prevent flickering
+- **Geometric Refinement** — advanced heuristics to disambiguate geometrically similar signs (e.g., Tiger vs. Ram vs. Dragon) based on specific landmark coordinates.
+- **Naruto's Arsenal**:
+  - **Shadow Clone Jutsu** — hold the Kage Bunshin sign for 1.5s: 16 clones appear from smoke, chakra aura glows, screen flashes white
+  - **Rasengan** — form a release sign with the left hand, then hold an open right palm to generate a spinning chakra sphere anchored to your hand.
+- **Sasuke's Arsenal**:
+  - **Chidori** — weave Ox→Hare→Monkey and hold right palm to generate lightning arcs anchored to your hand.
+  - **Fireball Jutsu** — weave Snake→Ram→Monkey→Boar→Horse→Tiger in sequence and open your mouth (MediaPipe face landmarks) to fire a directional flame sprite.
+  - **Sharingan Eyes** — procedurally drawn over eye contours when Sasuke is selected.
+- **Selfie segmentation** — your body is composited on top of the background layers so you appear *in front of* your own duplicates and effects.
 - **Screen recorder** — capture a `.webm` of your entire session for LinkedIn demo videos
 - **HUD overlay** — sign name, animated confidence bar, sequence progress cards, jutsu activation splash
 
@@ -95,7 +101,7 @@ The experience is deliberately authentic to the source material — you actually
 | **Persistence** | IndexedDB — training samples survive page reload |
 | **Audio** | Web Audio API — preloaded buffers, autoplay-policy compliant |
 | **Recording** | MediaRecorder API → `.webm` download |
-| **Frontend** | Vanilla ES6 modules, no bundler — runs on `python -m http.server` |
+| **Frontend** | Vanilla ES6 modules, no bundler — runs on a tiny no-cache static server (`python serve.py`) |
 
 ---
 
@@ -112,12 +118,21 @@ naruto-jutsu/
 │   ├── index.html              CDN scripts, canvas stack, chakra picker
 │   ├── app.js                  Main loop — orchestrates all modules (ES6 module)
 │   ├── app.css
-│   └── modules/
-│       ├── detector.js         Model loading, landmark normalisation, inference
-│       ├── jutsu-engine.js     Sliding-window confirmation, sequence buffer, activation
-│       ├── effects.js          Canvas layers: clones, smoke, aura, particles, flash, sound
-│       ├── hud.js              HUD overlay: sign display, sequence panel, activation splash
-│       └── recorder.js         captureStream() → MediaRecorder → .webm
+│   ├── modules/
+│   │   ├── config.js               Central tunable constants
+│   │   ├── app-state.js            State machine for the application
+│   │   ├── character-select.js     Carousel UI for selecting Naruto or Sasuke
+│   │   ├── detector.js             Model loading, landmark normalisation, inference
+│   │   ├── effects.js              Canvas layers: clones, smoke, aura, jutsu VideoFX (Rasengan, Chidori, Fireball), flash
+│   │   ├── gesture-classifier.js   Geometric heuristics & classification wrappers
+│   │   ├── hud.js                  HUD overlay: sign display, sequence panel, activation splash
+│   │   ├── jutsu-engine.js         Sliding-window confirmation, sequence buffer, activation
+│   │   ├── release-detector.js     Detects jutsu activation poses (e.g., Rasengan hand pose)
+│   │   ├── sign-refinement.js      Disambiguation logic for easily confused signs
+│   │   ├── log.js                  Logging utilities
+│   │   ├── debug-input.js          Keyboard overrides for testing
+│   │   └── recorder.js             captureStream() → MediaRecorder → .webm
+│   └── tests/                      HTML/JS unit tests for modules
 │
 ├── assets/
 │   ├── signs/                  ← Hand sign reference images (used in trainer + HUD)
@@ -132,13 +147,7 @@ naruto-jutsu/
 │   ├── gesture-model.json
 │   └── gesture-model.weights.bin
 │
-└── docs/
-    ├── CLAUDE.md               Module APIs, class map, CDN scripts, gotchas
-    ├── architecture.md
-    ├── prd.md
-    ├── techstack.md
-    ├── flow.md
-    └── progress.md
+└── serve.py                    ← Local static server (port 8765, no-cache)
 ```
 
 ### Per-Frame Pipeline
@@ -153,7 +162,7 @@ MediaPipe Holistic (30fps)
     │
     ├─→ engine.update(classId, confidence)
     │       sliding window [45 frames, init class 13]
-    │       confirmed when: same class in >70% AND confidence >0.85
+    │       confirmed when: same class in >70% AND confidence ≥0.90
     │       class 13 (None) resets window immediately
     │       sequence buffer: tracks multi-sign jutsu progress
     │
@@ -185,12 +194,12 @@ MediaPipe Holistic (30fps)
 
 ```bash
 cd naruto-jutsu
-python -m http.server 8080
+python serve.py          # serves on port 8765 with no-cache headers
 ```
 
 Open two tabs:
-- **Trainer:** `http://localhost:8080/trainer/`
-- **App:** `http://localhost:8080/app/`
+- **Trainer:** `http://localhost:8765/trainer/`
+- **App:** `http://localhost:8765/app/`
 
 > **Important:** MediaPipe loads workers from CDN that require a real HTTP origin — opening `index.html` directly as a `file://` URL will fail.
 
@@ -202,7 +211,7 @@ The classifier needs to learn *your* hands, not someone else's. The training wor
 
 ### Step 1 — Collect Samples
 
-1. Open the Trainer at `http://localhost:8080/trainer/`
+1. Open the Trainer at `http://localhost:8765/trainer/`
 2. Click a sign card to select it — a reference image appears showing exactly what the hand shape looks like
 3. Position your hands in the camera matching the reference image
 4. Click **Record Sign** (or press the overlay button) — a 3-second countdown starts, then 4 seconds of recording captures ~120 samples
@@ -234,23 +243,32 @@ Reload the app tab. The status bar will show **Model loaded ✓**.
 
 ## Using the App
 
-1. Open `http://localhost:8080/app/` with your trained model in `models/`
+1. Open `http://localhost:8765/app/` with your trained model in `models/`
 2. Stand back so your full upper body is visible
 3. Perform any hand sign — the top-left HUD shows the detected sign + confidence bar
 
-### Shadow Clone Jutsu
+### Character Selection
 
-Hold the **Kage Bunshin** sign (crossed fingers, class 12) for ~1.5 seconds. The confirmation window fills → screen flashes white → 16 clones of you emerge from smoke → chakra aura glows around your body.
+On load, you will be presented with a character carousel. Make two fists to open it, point your left index finger and move it to browse, then hold your left palm open to lock in **Naruto** or **Sasuke** (left thumb up closes it). Your selection dictates your jutsu arsenal and chakra aura color.
 
-The clones auto-disappear after 8 seconds.
+### Naruto's Arsenal
 
-### Fireball Jutsu (sequence)
+**Shadow Clone Jutsu (Kage Bunshin)**
+Hold the **Shadow Clone** sign (crossed fingers) for ~1.5 seconds. The confirmation window fills → screen flashes white → 16 clones of you emerge from smoke → chakra aura glows around your body.
 
-Perform the 6-sign sequence, holding each sign until it confirms:
+**Rasengan**
+Form a **Release** sign (index and middle finger extended, others curled) with your left hand, then hold an **Open Palm** with your right hand. A spinning chakra sphere will generate and anchor to your hand.
 
-**Snake (巳) → Ram (未) → Monkey (申) → Boar (亥) → Horse (午) → Tiger (寅)**
+### Sasuke's Arsenal
 
-The sequence panel slides up from the bottom showing your progress. You have 5 seconds between each sign. Completing the sequence fires the jutsu.
+**Chidori**
+Perform the 3-sign sequence: **Ox (丑) → Hare (卯) → Monkey (申)**, then hold an **Open Palm** with your right hand. Lightning arcs will generate from your palm.
+
+**Fireball Jutsu (Goukakyuu)**
+Perform the 6-sign sequence: **Serpent (巳) → Ram (未) → Monkey (申) → Boar (亥) → Horse (午) → Tiger (寅)**. Once the sequence is complete, **open your mouth** (detected via face landmarks) to breathe a directional fire sprite.
+
+**Sharingan**
+When Sasuke is selected, the Sharingan is procedurally drawn over your eyes automatically using face landmarks.
 
 ### Chakra Color
 
@@ -324,7 +342,6 @@ Individual sign images are stored in `assets/signs/` and used throughout the tra
 ## Known Limitations & Next Steps
 
 - **Sound files** — `assets/sounds/*.mp3` are empty placeholders. Replace with real Naruto sound effects for audio to work.
-- **Fireball visual** — The Fireball jutsu currently triggers the clone effect as a placeholder. A full fire particle system is post-MVP.
 - **Single-user** — The model is trained and calibrated for one person's hands. Sharing a model between users with different hand sizes/tones will degrade accuracy.
 - **Lighting sensitivity** — MediaPipe hand tracking degrades in poor lighting. Use a well-lit environment facing the camera.
 - **Mobile** — Not tested on mobile browsers. MediaPipe Holistic is GPU-intensive; desktop Chrome/Edge recommended.

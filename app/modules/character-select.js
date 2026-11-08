@@ -2,7 +2,8 @@
 //
 // Open gesture:   Rising edge of both-fists (same frame both hands first form a fist)
 // Re-open:        Rising edge of both-fists while menu is open → restarts slide-in animation
-// Scroll:         Left fist + horizontal movement (delta-anchored to hand position at engage)
+// Scroll:         config CAROUSEL.SCROLL_MODE — 'index' (default: left index point + move),
+//                 'palm' or 'twofinger' (legacy)
 // Confirm:        Left open palm held for CONFIRM_MS → character locked in
 // Exit:           Left thumb up (only after character is locked in)
 //
