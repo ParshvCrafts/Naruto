@@ -1,5 +1,19 @@
-# Internal planning & AI tooling docs — not part of the project
+# Internal planning & AI tooling docs — not part of the public project.
+# Versioned privately by the parent workspace repo (see ../CLAUDE.md), never pushed here.
 docs/
+CLAUDE.md
+AGENT_LEDGER.md
+
+# Raw stock footage/SFX (~110MB) — process into assets/effects/ before shipping
+assets/extra_for_future/
+
+# Tool logs
+.playwright-mcp/
+.playwright-cli/
+
+# Secrets
+.env*
+!.env.example
 
 # Dependencies & build artefacts
 node_modules/
