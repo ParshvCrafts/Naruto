@@ -1,5 +1,5 @@
 # Internal planning & AI tooling docs — not part of the public project.
-# Versioned privately by the parent workspace repo (see ../CLAUDE.md), never pushed here.
+# docs/ is its own private local-only git repo; CLAUDE.md is a stub importing docs/AGENT-GUIDE.md.
 docs/
 CLAUDE.md
 AGENT_LEDGER.md
