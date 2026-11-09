@@ -146,6 +146,7 @@ export const FIREBALL = Object.freeze({
   RELEASE_MS:   400,   // fade-out on mouth close / cap
   BURST_MS:     420,   // ignition front-burst full-frame flash duration
   BURST_ALPHA:  0.35,  // peak alpha of the ignition flash
+  ORIGIN_X:     0.96,  // emitter (narrow tip) position across the clip width, 0 = left edge
   GLOW_COLOR:   '#ff7a1a', // D-03: fixed fire orange, never tinted by the chakra colour
   SHAKE:        true,  // ignition screen shake (owner decision 2026-11-08)
   SHAKE_PX:     6,     // peak offset at 720p (scaled by S)

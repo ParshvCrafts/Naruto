@@ -162,9 +162,11 @@ export class FireballFX extends VideoFX {
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.globalCompositeOperation = 'screen';
-    // Pull the left edge back slightly so the intense core overlaps the mouth and
-    // the bulk of the jet extends outward from it.
-    ctx.drawImage(vid, cx - wpx * 0.15, cy - hpx / 2, wpx, hpx);
+    // The clip's emitter is the narrow tip near its RIGHT edge (it stays fixed while the
+    // billows move); put that point on the mouth so the fire leaves the mouth and balloons
+    // outward. (Anchoring the left edge drew the breath backwards, with the clip's cut-off
+    // end on the face.)
+    ctx.drawImage(vid, cx - wpx * this._cfg.ORIGIN_X, cy - hpx / 2, wpx, hpx);
     ctx.restore();
     return true;
   }
