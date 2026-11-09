@@ -43,7 +43,8 @@ export default class HUD {
     this._hintsSince  = 0;     // when the current hint list started showing
     this._splash      = null;  // { text, startTime }
     this._signImgs    = {};    // classId → HTMLImageElement (loaded lazily)
-    this._imgBase     = '../assets/signs';  // B3: was '/assets/signs' (absolute → 404 off-root)
+    // Relative to this module, not the page: works from /app/, the test pages and any sub-path host.
+    this._imgBase     = new URL('../../assets/signs', import.meta.url).href;
     this._charHint    = false; // B8/§H: show "make fists to choose character" hint
     this._debug       = log.debugEnabled; // ?debug=1 or 'L' toggle
     this._debugMode   = '';    // current AppState mode name for the debug strip
