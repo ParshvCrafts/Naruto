@@ -1,6 +1,6 @@
 // effects.js — Canvas rendering (layers 1-7)
 import { log } from './log.js';
-import { RASENGAN, CHIDORI, FIREBALL, SHARINGAN } from './config.js';
+import { RASENGAN, CHIDORI, FIREBALL, SHARINGAN, CHAKRA_DEFAULT } from './config.js';
 
 /**
  * VideoFX — a looping video sprite composited with `screen` blend at a hand anchor.
@@ -15,26 +15,47 @@ export class VideoFX {
     this._vid.muted = true;
     this._vid.playsInline = true;
     this._vid.preload = 'auto';
-    this._vid.loop = false;
+    // LOOP_POINT 0 = the whole clip loops: native looping is seamless. A clip with a
+    // spin-up intro (LOOP_POINT > 0) is looped manually in draw() just before its end;
+    // waiting for 'ended' (pause → seek → play) shows a visible hitch.
+    this._vid.loop = !(cfg.LOOP_POINT > 0);
     this._active = false;
     this._releasing = false;
+    this._failed = false;
     this._scale = cfg.SCALE_START;
     this._releaseStart = 0;
     this._ax = null; this._ay = null;   // EMA-smoothed anchor (normalized 0-1)
-    // Seamless loop: after the spin-up intro plays through, jump back to LOOP_POINT.
+    // Fallback if the clip still reaches its end (e.g. a stalled frame skipped the check).
     this._vid.addEventListener('ended', () => {
       if (!this._active) return;
       try { this._vid.currentTime = cfg.LOOP_POINT; this._vid.play().catch(() => {}); } catch {}
     });
+    // A clip that fails to load/decode must not leave an invisible "active" jutsu.
+    this._vid.addEventListener('error', () => {
+      this._failed = true;
+      this.forceStop();
+      log.warn('effects', `video sprite failed to load: ${src}`);
+    });
   }
 
+  /** @returns {boolean} false if the clip failed to load (jutsu cannot show). */
   activate() {
+    if (this._failed) return false;
     this._active = true;
     this._releasing = false;
     this._scale = this._cfg.SCALE_START;
     this._ax = this._ay = null;
     try { this._vid.currentTime = 0; } catch {}
     this._vid.play().catch(() => {});
+    return true;
+  }
+
+  /** Manual loop for clips with an intro: jump back to LOOP_POINT just before the end. */
+  _keepLooping() {
+    const v = this._vid, lp = this._cfg.LOOP_POINT;
+    if (lp > 0 && v.duration && v.currentTime >= v.duration - 0.1) {
+      try { v.currentTime = lp; } catch {}
+    }
   }
 
   release() {
@@ -76,6 +97,7 @@ export class VideoFX {
     }
     const vid = this._vid;
     if (!vid.videoWidth) return true;      // not decoded yet — keep alive
+    this._keepLooping();
     const wpx = this.drawSize(h);
     const hpx = wpx * (vid.videoHeight / vid.videoWidth);  // preserve source aspect (orb stays round)
     const cx = this._ax * w, cy = this._ay * h;
@@ -106,11 +128,17 @@ export class FireballFX extends VideoFX {
   }
 
   activate() {
-    super.activate();
+    if (!super.activate()) return false;
     if (this._burst) {
       this._burstStart = performance.now();
       try { this._burst.currentTime = 0; this._burst.play().catch(() => {}); } catch {}
     }
+    return true;
+  }
+
+  forceStop() {
+    super.forceStop();
+    try { this._burst?.pause(); } catch {}
   }
 
   /** Directional draw: flame core sits on the mouth anchor, jet extends horizontally. */
@@ -126,6 +154,7 @@ export class FireballFX extends VideoFX {
     }
     const vid = this._vid;
     if (!vid.videoWidth) return true;               // not decoded yet — keep alive
+    this._keepLooping();
     const wpx = this.drawSize(h);
     const hpx = wpx * (vid.videoHeight / vid.videoWidth);
     const cx = this._ax * w, cy = this._ay * h;
@@ -160,7 +189,7 @@ const PLAY_RELEASE_SOUND = true;
 
 export default class Effects {
   constructor() {
-    this._chakraColor    = '#00BFFF';
+    this._chakraColor    = CHAKRA_DEFAULT;
     this._particles      = [];
     this._flashOpacity   = 0;
     this._personCanvas   = null;
@@ -255,21 +284,21 @@ export default class Effects {
   }
 
   // ── Rasengan (VideoFX) API ─────────────────────────────────────────────────
-  rasenganActivate()          { this._rasengan?.activate(); }
+  rasenganActivate()          { return !!this._rasengan?.activate(); }
   rasenganRelease()           { this._rasengan?.release(); }
   rasenganForceStop()         { this._rasengan?.forceStop(); }
   setRasenganAnchor(nx, ny)   { this._rasengan?.setAnchor(nx, ny); }
   isRasenganActive()          { return !!this._rasengan?.isActive(); }
 
   // ── Chidori (VideoFX + lightning) API ───────────────────────────────────────
-  chidoriActivate()           { this._chidori?.activate(); }
+  chidoriActivate()           { return !!this._chidori?.activate(); }
   chidoriRelease()            { this._chidori?.release(); }
   chidoriForceStop()          { this._chidori?.forceStop(); }
   setChidoriAnchor(nx, ny)    { this._chidori?.setAnchor(nx, ny); }
   isChidoriActive()           { return !!this._chidori?.isActive(); }
 
   // ── Fireball (FireballFX) API — mouth-anchored directional flame (S17) ────────
-  fireballActivate()          { this._fireball?.activate(); }
+  fireballActivate()          { return !!this._fireball?.activate(); }
   fireballRelease()           { this._fireball?.release(); }
   fireballForceStop()         { this._fireball?.forceStop(); }
   setFireballAnchor(nx, ny)   { this._fireball?.setAnchor(nx, ny); }
@@ -281,6 +310,12 @@ export default class Effects {
   }
 
   async preload(assetsBase = '../assets') {
+    // Video sprites first: they are the largest downloads and the first jutsu needs them.
+    this._rasengan = new VideoFX(`${assetsBase}/effects/rasengan.mp4`, RASENGAN);
+    this._chidori  = new VideoFX(`${assetsBase}/effects/chidori.mp4`,  CHIDORI);
+    this._fireball = new FireballFX(`${assetsBase}/effects/fireball.mp4`, FIREBALL,
+                                    `${assetsBase}/effects/fireball_burst.mp4`);
+
     const imgPromises = [];
     this._smokeVariants.forEach(variant => {
       for (let f = 1; f <= 5; f++) {
@@ -299,34 +334,53 @@ export default class Effects {
     this._imagesLoaded = true;
     console.log('[effects] smoke images preloaded');
 
-    // Sound preloading — empty .mp3 files silently decode to null buffer (no error)
-    this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Sound preloading. Audio is optional: if the AudioContext can't be created the app
+    // runs silent rather than failing to boot.
+    try {
+      this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+      this._audioCtx = null;
+      log.warn('effects', `audio unavailable: ${e?.message ?? e}`);
+    }
     // B10: 'ambient' dropped — it was loaded but never played.
     const soundFiles = ['activation', 'clone_pop', 'kage_bunshin_no_jutsu'];
-    await Promise.all(soundFiles.map(async name => {
+    if (this._audioCtx) await Promise.all(soundFiles.map(async name => {
       try {
         const res = await fetch(`${assetsBase}/sounds/${name}.mp3`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = await res.arrayBuffer();
-        this._sounds[name] = await this._audioCtx.decodeAudioData(buf).catch(() => null);
-      } catch { this._sounds[name] = null; }
+        this._sounds[name] = await this._audioCtx.decodeAudioData(buf);
+      } catch (e) {
+        this._sounds[name] = null;
+        log.warn('effects', `sound failed: ${name} (${e?.message ?? e})`);
+      }
     }));
-    console.log('[effects] sounds preloaded (empty placeholders produce null buffers — no audio until real mp3s added)');
+    log.info('effects', 'assets preloaded');
+  }
 
-    // Looping video sprites (screen-composited at the right palm)
-    this._rasengan = new VideoFX(`${assetsBase}/effects/rasengan.mp4`, RASENGAN);
-    this._chidori  = new VideoFX(`${assetsBase}/effects/chidori.mp4`,  CHIDORI);
-    this._fireball = new FireballFX(`${assetsBase}/effects/fireball.mp4`, FIREBALL,
-                                    `${assetsBase}/effects/fireball_burst.mp4`);
-    log.info('effects', 'rasengan + chidori + fireball VideoFX ready');
+  /** Resume audio after a user gesture (browser autoplay policy). Safe to call often. */
+  resumeAudio() {
+    if (this._audioCtx?.state === 'suspended') this._audioCtx.resume().catch(() => {});
+  }
+
+  /** Cancel scheduled clone-pop sounds (spawn or release). */
+  _clearCloneTimers() {
+    this._cloneTimeouts.forEach(id => clearTimeout(id));
+    this._cloneTimeouts = [];
   }
 
   render(videoEl, segMask, { canvas, jutsuActive }) {
     if (!this._canvas) this.init(canvas);
     const ctx = this._ctx;
     const w = canvas.width, h = canvas.height;
+    // Camera not delivering frames yet (or lost): a 0×0 canvas makes drawImage throw.
+    if (!w || !h || videoEl.readyState < 2) return;
 
-    // Reset visual state when jutsu ends (engine auto-resets after 8s)
+    // Reset visual state when jutsu ends (engine reset / release complete)
     if (!jutsuActive && this._chakraActive) {
+      this._clearCloneTimers();
+      this._releasePending    = false;
+      this._releaseOnComplete = null;
       this._chakraActive   = false;
       this._cloneStartTime = null;
       this._activeSmokes   = [];
@@ -460,6 +514,7 @@ export default class Effects {
 
   /** Cancel any in-flight release animation without calling onComplete. */
   abortRelease() {
+    this._clearCloneTimers();
     this._releasePending    = false;
     this._releaseOnComplete = null;
   }
@@ -472,8 +527,11 @@ export default class Effects {
     if (!this._personCanvas) {
       this._personCanvas = document.createElement('canvas');
     }
-    this._personCanvas.width  = w;
-    this._personCanvas.height = h;
+    // Resizing a canvas reallocates its backing store — only do it when the size changes.
+    if (this._personCanvas.width !== w || this._personCanvas.height !== h) {
+      this._personCanvas.width  = w;
+      this._personCanvas.height = h;
+    }
     const pctx = this._personCanvas.getContext('2d');
     pctx.clearRect(0, 0, w, h);
     pctx.drawImage(segMask, 0, 0, w, h);
@@ -643,8 +701,8 @@ export default class Effects {
       ctx.globalAlpha = fx.isReleasing() ? 0.3 : 0.5;
       const r = size * 0.35;
       const grad = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, r);
-      grad.addColorStop(0, _hexA('#ff7a1a', 0.6));
-      grad.addColorStop(1, _hexA('#ff7a1a', 0));
+      grad.addColorStop(0, _hexA(FIREBALL.GLOW_COLOR, 0.6));
+      grad.addColorStop(1, _hexA(FIREBALL.GLOW_COLOR, 0));
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(a.x, a.y, r, 0, Math.PI * 2);

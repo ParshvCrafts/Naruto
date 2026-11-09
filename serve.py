@@ -4,7 +4,6 @@ Run: python serve.py
 Then open: http://localhost:8765/app/
 """
 import http.server
-import socketserver
 
 PORT = 8765
 
@@ -18,7 +17,14 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(fmt % args)
 
-with socketserver.TCPServer(('', PORT), NoCacheHandler) as httpd:
+# Threaded: browsers open speculative (preconnect) sockets that may never send a
+# request. A single-threaded TCPServer blocks on such a socket and every other
+# request (modules, model, videos) stalls until it times out.
+class Server(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+with Server(('', PORT), NoCacheHandler) as httpd:
     print(f'Serving at http://localhost:{PORT}/')
     print(f'Open app at http://localhost:{PORT}/app/')
     httpd.serve_forever()

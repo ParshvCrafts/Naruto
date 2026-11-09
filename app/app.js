@@ -47,6 +47,12 @@ const state          = new AppState();   // central mode gate (B6/B14)
 const debug          = new DebugInput(); // keyboard-simulated detector inputs (§G)
 let selectedCharacter = null;
 
+// localStorage throws in some locked-down/private browsers; preferences are optional.
+const store = {
+  get(k)    { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
+};
+
 // B1: voice-triggered release is a FUTURE feature, not wired by default. The
 // SpeechListener class stays, but only starts when the page URL has ?speech=1.
 const SPEECH_ENABLED = (() => {
@@ -64,45 +70,51 @@ async function init() {
     console.warn('[app] model not loaded:', e.message);
   }
 
-  // Preload smoke images + sounds
-  await fx.preload('../assets');
+  // Preload smoke images + sounds + video sprites. A failed asset degrades one effect;
+  // it must never stop the app from booting.
+  try {
+    await fx.preload('../assets');
+  } catch (e) {
+    log.error('app', `asset preload failed: ${e?.message ?? e}`);
+  }
   cs.loadCards('../assets/characters');
   state.boot();   // BOOT → IDLE once assets are ready
 
-  // Sync persisted character to engine + theme on page load
-  const saved = cs.getSelectedCharacter();
-  if (saved) {
-    selectedCharacter = saved;
-    engine.setCharacter(saved);
-    const initColor = saved === 'sasuke' ? CHAKRA.sasuke : CHAKRA.naruto;
-    fx.setChakraColor(initColor);
-    hud.setChakraColor(initColor);
-    const chakraSelectEl = document.getElementById('chakra-select');
-    if (chakraSelectEl) chakraSelectEl.value = initColor;
-  }
+  // Browsers keep audio suspended until a user gesture; resume on the first key/click.
+  const resumeAudio = () => fx.resumeAudio();
+  document.addEventListener('keydown', resumeAudio);
+  document.addEventListener('pointerdown', resumeAudio);
 
-  // Chakra color picker — restore saved preference, update fx+hud on change
+  // Chakra colour picker: free choice only while no character is selected. A character's
+  // theme (D-03) wins, so the picker is disabled then instead of silently ignoring input.
   const chakraSelect = document.getElementById('chakra-select');
-  const savedColor = localStorage.getItem('chakraColor');
-  if (savedColor) chakraSelect.value = savedColor;
-
-  // Only apply picker color if no character is selected (character theme takes priority)
-  if (!selectedCharacter) {
+  const savedColor = store.get('chakraColor');
+  if (savedColor && [...chakraSelect.options].some(o => o.value === savedColor)) {
+    chakraSelect.value = savedColor;
+  }
+  chakraSelect.addEventListener('change', () => {
+    chakraSelect.blur();   // keep keyboard shortcuts working after a mouse pick
+    if (selectedCharacter) return;
     fx.setChakraColor(chakraSelect.value);
     hud.setChakraColor(chakraSelect.value);
-  }
+    store.set('chakraColor', chakraSelect.value);
+  });
 
-  chakraSelect.addEventListener('change', () => {
-    if (selectedCharacter) return;  // character theme takes precedence
-    const color = chakraSelect.value;
+  /** Gate the engine to the character and apply its theme (or the picker colour if none). */
+  function applyCharacter(char) {
+    selectedCharacter = char;
+    engine.setCharacter(char);
+    const color = char === 'sasuke' ? CHAKRA.sasuke : char === 'naruto' ? CHAKRA.naruto : chakraSelect.value;
     fx.setChakraColor(color);
     hud.setChakraColor(color);
-    localStorage.setItem('chakraColor', color);
-  });
+    chakraSelect.disabled = !!char;
+    chakraSelect.title = char ? 'Chakra colour follows the selected character' : '';
+  }
+  applyCharacter(cs.getSelectedCharacter());   // persisted character (or none) on page load
 
   // Register jutsu activation handlers
   engine.onActivation('shadowClone', () => {
-    fx._audioCtx?.resume();  // best-effort; only succeeds if user has interacted first
+    fx.resumeAudio();  // best-effort; only succeeds if user has interacted first
     fx.triggerClones();
     fx.burstParticles(canvas.width / 2, canvas.height * 0.6);
     hud.showActivation('Shadow Clone Jutsu');
@@ -143,6 +155,7 @@ async function init() {
   // Chidori flow counters (S16)
   let chidoriOpenFrames  = 0;  // right open-palm frames while CHIDORI_READY → activate
   const chidoriRelease = new PalmReleaseTracker(CHIDORI);
+  let rightHandSeenThisJutsu = false;  // a real right hand was tracked since activation
   // Fireball flow counters (S17)
   let fireballOpenFrames  = 0;  // mouth-open frames while FIREBALL_READY → activate
   let fireballCloseFrames = 0;  // mouth-closed frames while fireball active → release
@@ -238,6 +251,7 @@ async function init() {
     if (csActive && !state.isCarouselOpen() && state.canOpenCarousel()) {
       state.openCarousel();
       engine.freezeTimeout();
+      debug.clear();   // a seal injected just before opening must not fire after closing
     } else if (!csActive && state.isCarouselOpen()) {
       state.closeCarousel();
       engine.unfreezeTimeout();
@@ -245,14 +259,7 @@ async function init() {
 
     // ── Character sync (engine + theme) ───────────────────────────────────────────
     const newChar = cs.getSelectedCharacter();
-    if (newChar !== selectedCharacter) {
-      selectedCharacter = newChar;
-      engine.setCharacter(newChar);
-      const color = newChar === 'sasuke' ? CHAKRA.sasuke : CHAKRA.naruto;
-      fx.setChakraColor(color);
-      hud.setChakraColor(color);
-      localStorage.setItem('chakraColor', color);
-    }
+    if (newChar !== selectedCharacter) applyCharacter(newChar);
 
     // ── MLP detection + engine update — gated by state (B14) ──────────────────────
     // Seal signs only feed the engine in IDLE/SEQUENCE (canRunEngine). While the
@@ -323,9 +330,13 @@ async function init() {
     // ── Rasengan flow (Naruto, S15) — engine-independent ──────────────────────────
     // Right open palm = real detector OR the 'p' debug toggle (same downstream path).
     const rightPalmOpen = gesture.isRightOpenPalm || debug.isRightPalmSim();
-    // Keyboard-only users have no tracked hand: once 'p' has been used, toggling it off
-    // counts as a present, closed palm (releases quickly) instead of a lost hand.
-    const rightPresent = gesture.rightHandPresent || debug.isRightPalmSimUsed();
+    // Keyboard-only users have no tracked hand: if 'p' has been used and no real right
+    // hand was seen during this jutsu, toggling 'p' off counts as a present, closed palm
+    // (quick release) instead of a lost hand. Once a real hand is seen, real tracking
+    // rules apply, so a camera user's dropout is still tolerated.
+    if (gesture.rightHandPresent) rightHandSeenThisJutsu = true;
+    const rightPresent = gesture.rightHandPresent ||
+      (debug.isRightPalmSimUsed() && !rightHandSeenThisJutsu);
 
     // Arm: IDLE + Naruto + left release sign held (no clone active). State machine
     // guarantees carousel/sequence/jutsu modes can't arm (armRasengan only from IDLE).
@@ -342,10 +353,15 @@ async function init() {
         state.disarm(); palmOpenFrames = 0; log.info('app', 'rasengan disarmed (timeout)');
       } else if (rightPalmOpen) {
         if (++palmOpenFrames >= RASENGAN.PALM_OPEN_FRAMES) {
-          state.activateRasengan(); fx.rasenganActivate();
-          palmOpenFrames = 0; rasenganRelease.reset();
-          hud.showActivation('Rasengan');
-          log.info('app', 'RASENGAN active');
+          palmOpenFrames = 0;
+          if (fx.rasenganActivate()) {
+            state.activateRasengan();
+            rasenganRelease.reset(); rightHandSeenThisJutsu = false;
+            hud.showActivation('Rasengan');
+            log.info('app', 'RASENGAN active');
+          } else {
+            state.disarm(); log.warn('app', 'rasengan effect unavailable');
+          }
         }
       } else {
         palmOpenFrames = 0;
@@ -376,10 +392,15 @@ async function init() {
         state.expireReady(); chidoriOpenFrames = 0; log.info('app', 'chidori READY expired');
       } else if (rightPalmOpen) {
         if (++chidoriOpenFrames >= CHIDORI.PALM_OPEN_FRAMES) {
-          state.activateChidori(); fx.chidoriActivate();
-          chidoriOpenFrames = 0; chidoriRelease.reset();
-          hud.showActivation('Chidori');
-          log.info('app', 'CHIDORI active');
+          chidoriOpenFrames = 0;
+          if (fx.chidoriActivate()) {
+            state.activateChidori();
+            chidoriRelease.reset(); rightHandSeenThisJutsu = false;
+            hud.showActivation('Chidori');
+            log.info('app', 'CHIDORI active');
+          } else {
+            state.expireReady(); log.warn('app', 'chidori effect unavailable');
+          }
         }
       } else {
         chidoriOpenFrames = 0;
@@ -412,10 +433,15 @@ async function init() {
         state.expireReady(); fireballOpenFrames = 0; log.info('app', 'fireball READY expired');
       } else if (mouthOpen) {
         if (++fireballOpenFrames >= MOUTH.OPEN_FRAMES) {
-          state.activateFireball(); fx.fireballActivate();
-          fireballOpenFrames = 0; fireballCloseFrames = 0; fireballStartedAt = _now;
-          hud.showActivation('Fireball');
-          log.info('app', 'FIREBALL active');
+          fireballOpenFrames = 0;
+          if (fx.fireballActivate()) {
+            state.activateFireball();
+            fireballCloseFrames = 0; fireballStartedAt = _now;
+            hud.showActivation('Fireball');
+            log.info('app', 'FIREBALL active');
+          } else {
+            state.expireReady(); log.warn('app', 'fireball effect unavailable');
+          }
         }
       } else {
         fireballOpenFrames = 0;
@@ -448,6 +474,13 @@ async function init() {
     // VideoFX); RELEASING clears to IDLE only once every jutsu fade has stopped.
     if (state.is(Mode.JUTSU_SHADOW_CLONE)) {
       if (!engine.isActive()) state.toIdle();
+    } else if ((state.is(Mode.JUTSU_RASENGAN) && !fx.isRasenganActive()) ||
+               (state.is(Mode.JUTSU_CHIDORI)  && !fx.isChidoriActive())  ||
+               (state.is(Mode.JUTSU_FIREBALL) && !fx.isFireballActive())) {
+      // The effect stopped on its own (e.g. its clip failed mid-play): never leave the
+      // app wedged in a jutsu mode that nothing can release.
+      log.warn('app', `${state.mode}: effect stopped unexpectedly → IDLE`);
+      state.toIdle();
     } else if (state.is(Mode.RELEASING) && !engine.isActive() &&
                !fx.isRasenganActive() && !fx.isChidoriActive() && !fx.isFireballActive()) {
       state.toIdle();
@@ -489,7 +522,7 @@ async function init() {
   // ── Record button — resume AudioContext (autoplay policy) on first click ────
   const recBtn = document.getElementById('btn-record');
   recBtn.addEventListener('click', () => {
-    fx._audioCtx?.resume();
+    fx.resumeAudio();
     if (recorder.isRecording) {
       recorder.stop();
       recBtn.textContent      = '⏺ Record';

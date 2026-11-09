@@ -36,7 +36,7 @@ export default class Detector {
     input.set(left, 63);
     // tf.tidy auto-disposes input tensor + output tensor; dataSync() result is a plain Float32Array (not a tensor)
     const probs = tf.tidy(() => {
-      const tensor = tf.tensor2d([Array.from(input)]);
+      const tensor = tf.tensor2d(input, [1, 126]);   // typed array directly — no per-frame JS array
       return this.model.predict(tensor).dataSync();
     });
     let classId = 0, confidence = 0;
