@@ -117,7 +117,7 @@ export default class HUD {
     this._drawSequencePanel(ctx, w, h, seqState, S);
 
     // FPS counter (bottom-right)
-    if (fps > 0) this._drawFPS(ctx, w, h, fps, S);
+    if (fps > 0 && !this._demo) this._drawFPS(ctx, w, h, fps, S);   // no fps counter in demo recordings
 
     // Character-selection hint (bottom-center) when nothing is confirmed
     if (this._charHint) this._drawCharHint(ctx, w, h, S);
@@ -419,6 +419,9 @@ export default class HUD {
 
   /** Keep bottom-anchored HUD elements above the DOM controls bar. @param {number} px canvas px */
   setBottomInset(px) { this._bottomInset = Math.max(0, px || 0); }
+
+  /** Demo mode: hide developer readouts (fps) so recordings stay clean. */
+  setDemoMode(on) { this._demo = !!on; }
 }
 
 function roundRect(ctx, x, y, w, h, r) {

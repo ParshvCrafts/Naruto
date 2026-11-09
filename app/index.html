@@ -6,7 +6,7 @@
   <title>Naruto Jutsu</title>
   <link rel="icon" href="data:,">  <!-- no favicon request (keeps the console 404-free) -->
   <!-- Single stylesheet (B17: inline critical CSS removed). serve.py sends no-cache. -->
-  <link rel="stylesheet" href="app.css?v=6">
+  <link rel="stylesheet" href="app.css?v=7">
 </head>
 <body>
   <div class="app-container">
@@ -44,6 +44,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Recording indicator (DOM: never captured in the video; hidden in demo mode) -->
+  <div id="rec-badge" hidden>● REC 0:00</div>
 
   <!-- Exit-demo hint (visible only in demo mode) -->
   <div id="demo-hint">Press D to exit demo</div>

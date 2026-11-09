@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Audio norm + recorder helper Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+  </style>
+</head>
+<body>
+<h1>normGain (SFX loudness) + pickMimeType / recordingName (recorder)</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import { normGain } from '../modules/audio-norm.js';
+import { pickMimeType, recordingName } from '../modules/recorder.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+const CFG = { TARGET_RMS: 0.1, MIN_NORM: 0.25, MAX_NORM: 4, SILENCE: 0.001 };
+const square = (amp, n = 1000) => Float32Array.from({ length: n }, (_, i) => (i % 2 ? amp : -amp));
+
+assert('N1: RMS 0.2 → gain 0.5', normGain(square(0.2), CFG).toFixed(3), '0.500');
+assert('N2: RMS 0.05 → gain 2', normGain(square(0.05), CFG).toFixed(3), '2.000');
+assert('N3: very quiet clip clamped at MAX_NORM', normGain(square(0.002), CFG), 4);
+assert('N4: very loud clip clamped at MIN_NORM', normGain(square(0.9), CFG), 0.25);
+assert('N5: silence → 1 (no blow-up)', normGain(new Float32Array(500), CFG), 1);
+{ const padded = new Float32Array(3000); padded.set(square(0.2), 1000);   // 1000 silent before/after
+  assert('N6: leading/trailing silence ignored', normGain(padded, CFG).toFixed(3), '0.500'); }
+
+assert('M1: first supported type wins',
+  pickMimeType(t => t === 'video/webm;codecs=vp8,opus' || t === 'video/webm'), 'video/webm;codecs=vp8,opus');
+assert('M2: falls back to plain webm', pickMimeType(t => t === 'video/webm'), 'video/webm');
+assert('M3: mp4-only browser (Safari)', pickMimeType(t => t === 'video/mp4'), 'video/mp4');
+assert('M4: nothing supported → "" (browser default)', pickMimeType(() => false), '');
+
+assert('F1: readable file name', recordingName(new Date(2026, 10, 8, 9, 5, 7), 'video/webm;codecs=vp9'),
+  'naruto-jutsu-2026-11-08_09-05-07.webm');
+assert('F2: mp4 extension', recordingName(new Date(2026, 0, 2, 3, 4, 5), 'video/mp4'),
+  'naruto-jutsu-2026-01-02_03-04-05.mp4');
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>

@@ -10,7 +10,7 @@ import SignRefinement    from './modules/sign-refinement.js';
 import GestureClassifier, { mouthAspectRatio } from './modules/gesture-classifier.js';
 import CharacterSelect   from './modules/character-select.js';
 import { isReleaseSign, SpeechListener } from './modules/release-detector.js';
-import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, PERF, CAMERA, cameraDims } from './modules/config.js';
+import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, PERF, CAMERA, SHARINGAN, cameraDims } from './modules/config.js';
 import { log } from './modules/log.js';
 import AppState, { Mode } from './modules/app-state.js';
 import DebugInput, { SEAL_KEYMAP } from './modules/debug-input.js';
@@ -324,7 +324,10 @@ async function init() {
 
     // ── Character sync (engine + theme) ───────────────────────────────────────────
     const newChar = cs.getSelectedCharacter();
-    if (newChar !== selectedCharacter) applyCharacter(newChar);
+    if (newChar !== selectedCharacter) {
+      applyCharacter(newChar);
+      if (newChar === 'sasuke' && SHARINGAN.ENABLED) fx.playSharingan();   // eyes ignite (S18)
+    }
 
     // ── MLP detection + engine update — gated by state (B14) ──────────────────────
     // Seal signs only feed the engine in IDLE/SEQUENCE (canRunEngine). While the
@@ -585,26 +588,42 @@ async function init() {
       perf: () => ({ fps: _fps, dims, fallbackArmed: !!fpsFallback, fallbackPending }) };
   }
 
-  // ── Record button — resume AudioContext (autoplay policy) on first click ────
-  const recBtn = document.getElementById('btn-record');
+  // ── Record: camera+effects canvas + HUD canvas + SFX → video file (S19) ─────
+  // The REC badge is DOM, so it never appears in the recording; demo mode hides it.
+  const recBtn   = document.getElementById('btn-record');
+  const recBadge = document.getElementById('rec-badge');
+  let recTimer = 0;
+  function setRecordingUI(on) {
+    recBtn.textContent = on ? '⏹ Stop' : '⏺ Record';
+    recBtn.classList.toggle('recording', on);
+    recBadge.hidden = !on;
+    clearInterval(recTimer);
+    if (on) {
+      const tick = () => {
+        const t = Math.floor(recorder.elapsedMs() / 1000);
+        recBadge.textContent = `● REC ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+      };
+      tick(); recTimer = setInterval(tick, 500);
+    }
+  }
   recBtn.addEventListener('click', () => {
     fx.resumeAudio();
-    if (recorder.isRecording) {
-      recorder.stop();
-      recBtn.textContent      = '⏺ Record';
-      recBtn.style.background = '#ff6b00';
-    } else {
-      recorder.init(canvas);
-      recorder.start();
-      recBtn.textContent      = '⏹ Stop';
-      recBtn.style.background = '#c00';
+    if (recorder.isRecording) { recorder.stop(); setRecordingUI(false); return; }
+    try {
+      if (recorder.start({ layers: [canvas, hudCanvas], audio: fx.audioOutput() })) setRecordingUI(true);
+    } catch (e) {
+      log.error('app', `recording failed: ${e?.message ?? e}`);
+      overlay.show({ id: 'record', tone: 'warn', title: 'Recording is not available',
+        detail: `${e?.message ?? e}. Try Chrome or Edge.`, action: 'OK', onAction: () => overlay.hide('record') });
     }
   });
+  window.addEventListener('beforeunload', () => recorder.stop());
 
   // ── Demo mode — hides controls bar for clean screen recording ──────────────
   const btnDemo = document.getElementById('btn-demo');
   function toggleDemoMode() {
     const active = document.body.classList.toggle('demo-mode');
+    hud.setDemoMode(active);
     updateHudInset();
     btnDemo.textContent = active ? '▶ Exit Demo [D]' : '⬜ Demo [D]';
     console.log(`[app] demo mode ${active ? 'ON' : 'OFF'}`);

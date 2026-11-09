@@ -1,6 +1,7 @@
 // effects.js — Canvas rendering (layers 1-7)
 import { log } from './log.js';
-import { RASENGAN, CHIDORI, FIREBALL, SHARINGAN, CHAKRA_DEFAULT } from './config.js';
+import { RASENGAN, CHIDORI, FIREBALL, SHARINGAN, CHAKRA_DEFAULT, AUDIO } from './config.js';
+import { normGain } from './audio-norm.js';
 
 /**
  * VideoFX — a looping video sprite composited with `screen` blend at a hand anchor.
@@ -237,7 +238,9 @@ export default class Effects {
     this._imagesLoaded  = false;
 
     this._sounds   = {};
+    this._norm     = {};     // name → loudness-normalising gain (measured at decode)
     this._audioCtx = null;
+    this._master   = null;   // all SFX → master gain → compressor → speakers (+ recorder tap)
     this._cloneTimeouts = [];
 
     // Sequential release animation state
@@ -342,14 +345,25 @@ export default class Effects {
       this._audioCtx = null;
       log.warn('effects', `audio unavailable: ${e?.message ?? e}`);
     }
+    if (this._audioCtx) {
+      // Master bus: a compressor keeps stacked SFX (18 clone pops) from clipping.
+      const comp = this._audioCtx.createDynamicsCompressor();
+      comp.threshold.value = AUDIO.COMP_THRESHOLD_DB;
+      comp.ratio.value     = AUDIO.COMP_RATIO;
+      this._master = this._audioCtx.createGain();
+      this._master.gain.value = AUDIO.MASTER_GAIN;
+      this._master.connect(comp);
+      comp.connect(this._audioCtx.destination);
+    }
     // B10: 'ambient' dropped — it was loaded but never played.
-    const soundFiles = ['activation', 'clone_pop', 'kage_bunshin_no_jutsu'];
+    const soundFiles = ['activation', 'clone_pop', 'kage_bunshin_no_jutsu', 'sharingan'];
     if (this._audioCtx) await Promise.all(soundFiles.map(async name => {
       try {
         const res = await fetch(`${assetsBase}/sounds/${name}.mp3`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = await res.arrayBuffer();
         this._sounds[name] = await this._audioCtx.decodeAudioData(buf);
+        this._norm[name] = normGain(this._sounds[name].getChannelData(0), AUDIO);
       } catch (e) {
         this._sounds[name] = null;
         log.warn('effects', `sound failed: ${name} (${e?.message ?? e})`);
@@ -357,6 +371,12 @@ export default class Effects {
     }));
     log.info('effects', 'assets preloaded');
   }
+
+  /** Audio graph for the recorder: { ctx, node } (node = master bus), or null without audio. */
+  audioOutput() { return this._audioCtx && this._master ? { ctx: this._audioCtx, node: this._master } : null; }
+
+  /** Sharingan activation sound (Sasuke confirmed). */
+  playSharingan() { this._playSound('sharingan', AUDIO.SHARINGAN_VOL); }
 
   /** Resume audio after a user gesture (browser autoplay policy). Safe to call often. */
   resumeAudio() {
@@ -836,10 +856,10 @@ export default class Effects {
     if (this._audioCtx.state === 'suspended') this._audioCtx.resume();
     const src  = this._audioCtx.createBufferSource();
     const gain = this._audioCtx.createGain();
-    gain.gain.value = volume;
+    gain.gain.value = volume * (this._norm[name] ?? 1);
     src.buffer = buf;
     src.connect(gain);
-    gain.connect(this._audioCtx.destination);
+    gain.connect(this._master ?? this._audioCtx.destination);
     src.start();
   }
 
@@ -858,18 +878,18 @@ export default class Effects {
 
     const src1  = this._audioCtx.createBufferSource();
     const gain1 = this._audioCtx.createGain();
-    gain1.gain.value = vol1;
+    gain1.gain.value = vol1 * (this._norm[name1] ?? 1);
     src1.buffer = buf1;
     src1.connect(gain1);
-    gain1.connect(this._audioCtx.destination);
+    gain1.connect(this._master ?? this._audioCtx.destination);
     src1.start(now);
 
     const src2  = this._audioCtx.createBufferSource();
     const gain2 = this._audioCtx.createGain();
-    gain2.gain.value = vol2;
+    gain2.gain.value = vol2 * (this._norm[name2] ?? 1);
     src2.buffer = buf2;
     src2.connect(gain2);
-    gain2.connect(this._audioCtx.destination);
+    gain2.connect(this._master ?? this._audioCtx.destination);
     src2.start(now + buf1.duration);  // sample-accurate scheduling
   }
 

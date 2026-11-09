@@ -197,6 +197,27 @@ export function cameraDims() {
     : { width: CAMERA.HD_WIDTH, height: CAMERA.HD_HEIGHT };
 }
 
+// ─── Audio (S18) ──────────────────────────────────────────────────────────────
+// Clips come from different sources (mean loudness −11 dB … −21 dB measured with ffmpeg
+// volumedetect), so each is scaled at decode time to TARGET_RMS (audio-norm.js); call-site
+// volumes then express the intended mix on equal-loudness clips.
+export const AUDIO = Object.freeze({
+  TARGET_RMS:        0.13,  // ≈ median clip loudness → overall level unchanged
+  MIN_NORM:          0.25,  // never attenuate a clip more than this…
+  MAX_NORM:          4,     // …or boost it more than this
+  SILENCE:           0.001, // samples below this don't count towards loudness
+  MASTER_GAIN:       0.9,
+  COMP_THRESHOLD_DB: -12,   // master compressor: stacked clone pops can't clip
+  COMP_RATIO:        4,
+  SHARINGAN_VOL:     0.7,
+});
+
+// ─── Recording (S19) ──────────────────────────────────────────────────────────
+export const RECORD = Object.freeze({
+  FPS:       30,
+  VIDEO_BPS: 8_000_000,     // ~8 Mbps: crisp 1080p effects without huge files
+});
+
 // ─── Performance ──────────────────────────────────────────────────────────────
 export const PERF = Object.freeze({
   FPS_EMA: 0.1,   // smoothing for the fps estimate (HUD counter + 720p auto-fallback gauge)
@@ -210,6 +231,6 @@ export const HUD = Object.freeze({
 
 // Frozen aggregate for convenient default import.
 const config = Object.freeze({
-  CHAKRA, CHAKRA_DEFAULT, ENGINE, SEQUENCES, REFINE, CAROUSEL, GESTURE, RELEASE, CAMERA, HUD, PERF,
+  CHAKRA, CHAKRA_DEFAULT, ENGINE, SEQUENCES, REFINE, CAROUSEL, GESTURE, RELEASE, CAMERA, HUD, PERF, AUDIO, RECORD,
 });
 export default config;

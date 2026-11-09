@@ -180,3 +180,19 @@ body.demo-mode #demo-hint {
 #status-overlay.busy .so-spinner { display: block; }
 @keyframes so-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .so-spinner { animation-duration: 3s; } }
+
+/* ── Recording (S19) ── */
+.ctrl-btn.recording { background: #c00; }
+#rec-badge {
+  position: fixed;
+  top: 12px;
+  left: 14px;
+  z-index: 20;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #ff4d4d;
+  font: bold 0.85rem monospace;
+  pointer-events: none;
+}
+#rec-badge[hidden], body.demo-mode #rec-badge { display: none; }
