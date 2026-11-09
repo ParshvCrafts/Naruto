@@ -22,7 +22,9 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
 # request (modules, model, videos) stalls until it times out.
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    # On Windows SO_REUSEADDR lets a SECOND serve.py bind the same port silently, so a
+    # stale instance could keep answering. Fail loudly with 'address in use' instead.
+    allow_reuse_address = False
 
 with Server(('', PORT), NoCacheHandler) as httpd:
     print(f'Serving at http://localhost:{PORT}/')

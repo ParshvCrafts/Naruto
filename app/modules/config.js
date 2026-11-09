@@ -184,6 +184,11 @@ export function cameraDims() {
     : { width: CAMERA.HD_WIDTH, height: CAMERA.HD_HEIGHT };
 }
 
+// ─── Performance ──────────────────────────────────────────────────────────────
+export const PERF = Object.freeze({
+  FPS_EMA: 0.1,   // smoothing for the fps estimate (HUD counter + 720p auto-fallback gauge)
+});
+
 // ─── HUD reference metrics (px, at 720p; scale by S = canvas.height/720 in S12) ─
 export const HUD = Object.freeze({
   REF_HEIGHT: 720,          // reference height the raw px metrics were authored against
@@ -192,6 +197,6 @@ export const HUD = Object.freeze({
 
 // Frozen aggregate for convenient default import.
 const config = Object.freeze({
-  CHAKRA, CHAKRA_DEFAULT, ENGINE, SEQUENCES, REFINE, CAROUSEL, GESTURE, RELEASE, CAMERA, HUD,
+  CHAKRA, CHAKRA_DEFAULT, ENGINE, SEQUENCES, REFINE, CAROUSEL, GESTURE, RELEASE, CAMERA, HUD, PERF,
 });
 export default config;

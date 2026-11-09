@@ -10,7 +10,7 @@ import SignRefinement    from './modules/sign-refinement.js';
 import GestureClassifier, { mouthAspectRatio } from './modules/gesture-classifier.js';
 import CharacterSelect   from './modules/character-select.js';
 import { isReleaseSign, SpeechListener } from './modules/release-detector.js';
-import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, cameraDims } from './modules/config.js';
+import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, PERF, cameraDims } from './modules/config.js';
 import { log } from './modules/log.js';
 import AppState, { Mode } from './modules/app-state.js';
 import DebugInput, { SEAL_KEYMAP } from './modules/debug-input.js';
@@ -33,6 +33,17 @@ function updateAspect(vw, vh) {
   canvasWrap?.style.setProperty('--ar', String(ar));
 }
 video.addEventListener('loadedmetadata', () => updateAspect(video.videoWidth, video.videoHeight));
+
+// Bottom-anchored HUD elements (seal panel, hint, fps) must sit above the DOM controls
+// bar, which overlays the canvas except in demo mode. Converted CSS px → canvas px.
+const controlsEl = document.querySelector('.controls');
+function updateHudInset() {
+  const cssH = canvas.getBoundingClientRect().height;
+  if (!cssH || !canvas.height || !controlsEl) return;
+  const barCss = document.body.classList.contains('demo-mode') ? 0 : controlsEl.getBoundingClientRect().height;
+  hud.setBottomInset(barCss * canvas.height / cssH);
+}
+if (window.ResizeObserver) new ResizeObserver(() => updateHudInset()).observe(canvasWrap);
 
 const detector = new Detector();
 const engine   = new JutsuEngine();
@@ -108,7 +119,9 @@ async function init() {
     fx.setChakraColor(color);
     hud.setChakraColor(color);
     chakraSelect.disabled = !!char;
-    chakraSelect.title = char ? 'Chakra colour follows the selected character' : '';
+    // The character's theme owns the colour; showing a stale picker value would mislead.
+    const label = chakraSelect.closest('label');
+    if (label) label.style.display = char ? 'none' : '';
   }
   applyCharacter(cs.getSelectedCharacter());   // persisted character (or none) on page load
 
@@ -198,17 +211,25 @@ async function init() {
 
   // FPS tracking
   let _lastFrameTs = 0;
-  let _fps = 0;
+  let _fpsAvg = 0;   // EMA-smoothed fps (the instantaneous 1000/dt jumps every frame)
+  let _fps = 0;      // rounded value shown in the HUD
 
   // Per-frame pipeline
   function onResults(results) {
     const _now = performance.now();
-    if (_lastFrameTs > 0) _fps = Math.round(1000 / (_now - _lastFrameTs));
+    const _dt = _now - _lastFrameTs;
+    // A long gap (tab hidden, camera stall) is not a frame-rate sample: skip it.
+    if (_lastFrameTs > 0 && _dt > 0 && _dt < 1000) {
+      const inst = 1000 / _dt;
+      _fpsAvg = _fpsAvg ? _fpsAvg + PERF.FPS_EMA * (inst - _fpsAvg) : inst;
+      _fps = Math.round(_fpsAvg);
+    }
     _lastFrameTs = _now;
     const vw = video.videoWidth, vh = video.videoHeight;
     if (canvas.width !== vw || canvas.height !== vh) {
       canvas.width = vw; canvas.height = vh;
       updateAspect(vw, vh);   // keep letterbox aspect locked to actual backing store
+      updateHudInset();
     }
     if (hudCanvas.width !== vw || hudCanvas.height !== vh) {
       hudCanvas.width = vw; hudCanvas.height = vh;
@@ -539,6 +560,7 @@ async function init() {
   const btnDemo = document.getElementById('btn-demo');
   function toggleDemoMode() {
     const active = document.body.classList.toggle('demo-mode');
+    updateHudInset();
     btnDemo.textContent = active ? '▶ Exit Demo [D]' : '⬜ Demo [D]';
     console.log(`[app] demo mode ${active ? 'ON' : 'OFF'}`);
   }

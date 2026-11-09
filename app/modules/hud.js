@@ -3,9 +3,9 @@
 // S = canvas.height / 720 so the HUD keeps the SAME relative size at any camera
 // resolution (S12/§E, fixes B16). Positions are S-scaled or fraction-of-frame.
 import { log } from './log.js';
-import { HUD as HUD_CFG } from './config.js';
+import { HUD as HUD_CFG, CHAKRA_DEFAULT } from './config.js';
 
-const REF_H = 720;  // reference height the raw px metrics were tuned against
+const REF_H = HUD_CFG.REF_HEIGHT;  // reference height the raw px metrics were tuned against
 const SIGN_HYSTERESIS = HUD_CFG.SIGN_HYSTERESIS_FRAMES;  // frames before the pill switches sign
 
 // Consistent activation splash content per jutsu (kanji + romaji). Keyed by the
@@ -34,7 +34,8 @@ const SIGN_IMAGES = [
 
 export default class HUD {
   constructor() {
-    this._chakraColor = '#ff6b00';
+    this._chakraColor = CHAKRA_DEFAULT;
+    this._bottomInset = 0;     // canvas px covered by the DOM controls bar (0 in demo mode)
     this._splash      = null;  // { text, startTime }
     this._signImgs    = {};    // classId → HTMLImageElement (loaded lazily)
     this._imgBase     = '../assets/signs';  // B3: was '/assets/signs' (absolute → 404 off-root)
@@ -194,7 +195,7 @@ export default class HUD {
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'alphabetic';
     const tw = ctx.measureText(msg).width;
-    const px = w / 2, py = h - 24 * S;
+    const px = w / 2, py = h - this._bottomInset - 24 * S;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     roundRect(ctx, px - tw / 2 - 14 * S, py - 22 * S, tw + 28 * S, 32 * S, 8 * S);
     ctx.fill();
@@ -210,10 +211,10 @@ export default class HUD {
     ctx.textAlign    = 'right';
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle    = 'rgba(0,0,0,0.45)';
-    ctx.fillText(`${fps} fps`, w - 10 * S, h - 12 * S);
+    ctx.fillText(`${fps} fps`, w - 10 * S, h - this._bottomInset - 12 * S);
     ctx.fillStyle    = color;
     ctx.globalAlpha  = 0.7;
-    ctx.fillText(`${fps} fps`, w - 10 * S, h - 12 * S);
+    ctx.fillText(`${fps} fps`, w - 10 * S, h - this._bottomInset - 12 * S);
     ctx.restore();
   }
 
@@ -353,7 +354,7 @@ export default class HUD {
     const cardW  = 64 * S, cardH = 80 * S, gap = 8 * S;
     const totalW = cards.length * (cardW + gap) - gap + 40 * S;
     const panelX = (w - totalW) / 2;
-    const panelY = h - cardH - 30 * S;
+    const panelY = h - this._bottomInset - cardH - 30 * S;
 
     ctx.save();
     // Panel background
@@ -361,7 +362,7 @@ export default class HUD {
     roundRect(ctx, panelX - 10 * S, panelY - 32 * S, totalW + 20 * S, cardH + 44 * S, 10 * S);
     ctx.fill();
     ctx.font      = `bold ${12 * S}px monospace`;
-    ctx.fillStyle = this._chakraColor;
+    ctx.fillStyle = '#ffffff';   // D-03: text stays white; chakra colour only on borders/glow
     ctx.textAlign = 'center';
     ctx.fillText(seqState.jutsuName.toUpperCase(), w / 2, panelY - 12 * S);
 
@@ -372,7 +373,7 @@ export default class HUD {
       const hasSignImg = signImg && signImg.complete && signImg.naturalWidth > 0;
 
       // Card background
-      ctx.fillStyle = isDone ? this._chakraColor + '4D' : 'rgba(20,20,40,0.8)';  // 4D = 30% opacity
+      ctx.fillStyle = isDone ? _hexA(this._chakraColor, 0.3) : 'rgba(20,20,40,0.8)';
       roundRect(ctx, cx, panelY, cardW, cardH, 6 * S);
       ctx.fill();
 
@@ -397,7 +398,7 @@ export default class HUD {
       // Label below image
       const labelY = panelY + cardH - 10 * S;
       ctx.font        = isDone ? `bold ${10 * S}px monospace` : `${10 * S}px monospace`;
-      ctx.fillStyle   = isDone ? this._chakraColor : '#555';
+      ctx.fillStyle   = isDone ? '#ffffff' : '#888';   // D-03: white text, chakra glow
       ctx.shadowColor = isDone ? this._chakraColor : 'transparent';
       ctx.shadowBlur  = isDone ? 6 * S : 0;
       ctx.textAlign   = 'center';
@@ -415,6 +416,9 @@ export default class HUD {
   }
 
   setChakraColor(hex) { this._chakraColor = hex; }
+
+  /** Keep bottom-anchored HUD elements above the DOM controls bar. @param {number} px canvas px */
+  setBottomInset(px) { this._bottomInset = Math.max(0, px || 0); }
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -431,4 +435,11 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
+}
+
+/** '#RRGGBB' + alpha → 'rgba(r,g,b,a)'. Falls back to the hex if it isn't 6-digit. */
+function _hexA(hex, alpha) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return hex;
+  return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${alpha})`;
 }
