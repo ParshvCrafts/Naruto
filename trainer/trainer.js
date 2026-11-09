@@ -1,4 +1,5 @@
-// trainer.js — Naruto Jutsu Trainer
+// trainer.js — Naruto Jutsu Trainer (ES module)
+import { splitHoldout, augment, validateImport } from './dataset.js';
 // CDN globals available: Holistic, Camera, tf, drawConnectors, drawLandmarks, HAND_CONNECTIONS
 // HAND_CONNECTIONS is exported by the @mediapipe/holistic CDN bundle as window.HAND_CONNECTIONS.
 // Defensive fallback ensures no crash if the CDN version changes.
@@ -67,7 +68,9 @@ const SIGNS = [
   { id: 13, name: 'None',    label: 'Neutral',      img: null               },
 ];
 
-const MIN_SAMPLES = 150;  // minimum samples per class before training unlocks
+const MIN_SAMPLES      = 150;  // minimum samples per sign class before training unlocks
+const MIN_SAMPLES_NONE = 300;  // None/Neutral needs more variety (see the recording tips)
+const minFor = id => (id === 13 ? MIN_SAMPLES_NONE : MIN_SAMPLES);
 
 const video  = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -89,14 +92,14 @@ function updateAllCounts() {
   SIGNS.forEach(s => {
     const el   = document.getElementById(`count-${s.id}`);
     const card = document.querySelector(`.sign-card[data-id="${s.id}"]`);
-    if (el)   el.textContent = samples[s.id].length;
-    if (card) card.classList.toggle('ready', samples[s.id].length >= MIN_SAMPLES);
+    if (el)   el.textContent = `${samples[s.id].length}/${minFor(s.id)}`;
+    if (card) card.classList.toggle('ready', samples[s.id].length >= minFor(s.id));
   });
   checkTrainable();
 }
 
 function checkTrainable() {
-  const allReady = SIGNS.every(s => samples[s.id].length >= MIN_SAMPLES);
+  const allReady = SIGNS.every(s => samples[s.id].length >= minFor(s.id));
   document.getElementById('btn-train').disabled = !allReady;
 }
 
@@ -133,7 +136,9 @@ function shouldCollect(classId, results) {
 
 // --- Recording state ---
 let selectedSign = null;
-let isRecording  = false;
+let isRecording  = false;  // a take is in progress (countdown OR capture) — blocks re-entry
+let collecting   = false;  // capture window only: countdown frames are NOT samples
+let recSign      = null;   // sign locked at take start (clicking another card mid-take can't relabel)
 let lastResults  = null;
 
 const COUNTDOWN_MS = 3000;
@@ -145,6 +150,8 @@ async function startRecording() {
   if (selectedSign === null) { alert('Select a sign first'); return; }
   if (isRecording) return;
   isRecording = true;  // set immediately — prevents re-entrant countdown
+  recSign = selectedSign;
+  const before = samples[recSign].length;
 
   // 3-second countdown
   const cdEl = document.getElementById('countdown');
@@ -158,13 +165,22 @@ async function startRecording() {
   // 4-second recording window
   const badge = document.getElementById('rec-badge');
   badge.classList.remove('hidden');
+  collecting = true;
   await sleep(RECORD_MS);
+  collecting = false;
   isRecording = false;
   badge.classList.add('hidden');
 
-  if (db) await dbSave(db, selectedSign, samples[selectedSign]);
+  try {
+    if (db) await dbSave(db, recSign, samples[recSign]);
+  } catch (e) {
+    console.error('[trainer] could not save samples:', e);
+  }
   updateAllCounts();
-  console.log(`[trainer] recorded ${samples[selectedSign].length} samples for sign ${selectedSign}`);
+  const got = samples[recSign].length - before;
+  setStatus(got ? `Recorded ${got} frames for ${SIGNS[recSign].label}.`
+                : `No frames captured for ${SIGNS[recSign].label} — are both hands in view?`);
+  console.log(`[trainer] take: +${got} samples for sign ${recSign}`);
 }
 
 // --- Camera + MediaPipe bootstrap ---
@@ -183,7 +199,12 @@ const camera = new Camera(video, {
   onFrame: async () => { await holistic.send({ image: video }); },
   width: 640, height: 480
 });
-camera.start().then(() => console.log('[trainer] camera started'));
+camera.start()
+  .then(() => console.log('[trainer] camera started'))
+  .catch(err => {
+    console.error('[trainer] camera failed:', err);
+    setStatus(`Camera unavailable (${err?.name || err}). Allow camera access in the address bar and reload.`);
+  });
 
 function onResults(results) {
   const vw = video.videoWidth, vh = video.videoHeight;
@@ -215,11 +236,11 @@ function onResults(results) {
 
   // Sample collection — uses raw landmark coords (not flipped)
   // NOTE: using the original OR condition here; Task 8.2 replaces it with shouldCollect()
-  if (isRecording && selectedSign !== null) {
-    if (shouldCollect(selectedSign, results)) {
+  if (collecting && recSign !== null) {
+    if (shouldCollect(recSign, results)) {
       const vec = extract(results.rightHandLandmarks, results.leftHandLandmarks);
-      samples[selectedSign].push(vec);
-      if (samples[selectedSign].length % 10 === 0) updateAllCounts();
+      samples[recSign].push(vec);
+      if (samples[recSign].length % 10 === 0) updateAllCounts();
     }
   }
 }
@@ -230,7 +251,7 @@ SIGNS.forEach(sign => {
   const card = document.createElement('div');
   card.className  = 'sign-card';
   card.dataset.id = sign.id;
-  const imgSrc = sign.img ? `/assets/signs/${sign.img}` : '';
+  const imgSrc = sign.img ? `../assets/signs/${sign.img}` : '';
   card.innerHTML  = `
     <img src="${imgSrc}" alt="${sign.label}" onerror="this.style.visibility='hidden'">
     <div class="sign-name">${sign.name} (${sign.label})</div>
@@ -255,7 +276,7 @@ function selectSign(id) {
   // Update reference panel
   const sign = SIGNS[id];
   if (sign.img) {
-    refImg.src   = `/assets/signs/${sign.img}`;
+    refImg.src   = `../assets/signs/${sign.img}`;
     refImg.alt   = sign.label;
     refName.textContent  = `${sign.name} — ${sign.label}`;
     refLabel.textContent = `Class ID ${sign.id}  ·  Form this sign with both hands`;
@@ -310,30 +331,16 @@ async function trainModel() {
     statusEl.textContent = 'Train new model: preparing data (3× augmentation)…';
   }
 
-  // Build feature matrix (xs) and one-hot labels (ys)
-  const allX = [], allY = [];
-  SIGNS.forEach(s => {
-    const label = new Array(14).fill(0);
-    label[s.id] = 1;
-    samples[s.id].forEach(vec => {
-      // Original sample
-      allX.push(vec);
-      allY.push(label.slice());
-      // 3 augmented copies with ±2% random landmark jitter
-      for (let a = 0; a < 3; a++) {
-        allX.push(vec.map(v => v + (Math.random() * 0.04 - 0.02)));
-        allY.push(label.slice());
-      }
-    });
-  });
-
-  // Shuffle before splitting
-  const idx   = tf.util.createShuffledIndices(allX.length);
-  const xShuf = Array.from(idx).map(i => allX[i]);
-  const yShuf = Array.from(idx).map(i => allY[i]);
-
-  const xs = tf.tensor2d(xShuf);
-  const ys = tf.tensor2d(yShuf);
+  // Hold out the LAST 15% of each sign's recordings, then augment the TRAIN rows only
+  // (see dataset.js for why a random frame split overstates accuracy).
+  const { train, val } = splitHoldout(samples, 0.15);
+  const trainRows = augment(train, 3, 0.02);
+  const shuffled  = Array.from(tf.util.createShuffledIndices(trainRows.length)).map(i => trainRows[i]);
+  const oneHot = rows => tf.oneHot(tf.tensor1d(rows.map(r => r.y), 'int32'), 14).toFloat();
+  const xs  = tf.tensor2d(shuffled.map(r => r.x));
+  const ys  = oneHot(shuffled);
+  const xvs = tf.tensor2d(val.map(r => r.x));
+  const yvs = oneHot(val);
 
   if (model) model.dispose();  // free GPU memory before building a new model
   model = buildModel();
@@ -343,19 +350,23 @@ async function trainModel() {
     await model.fit(xs, ys, {
       epochs: 100,
       batchSize: 16,
-      validationSplit: 0.1,
+      validationData: [xvs, yvs],
       callbacks: {
         onEpochEnd: (epoch, logs) => {
           const acc = Math.round((logs.val_acc ?? logs.acc) * 100);
           fillEl.style.width  = `${acc}%`;
           labelEl.textContent = `${acc}%`;
-          statusEl.textContent = `Epoch ${epoch + 1}/100 — accuracy: ${acc}%`;
+          statusEl.textContent = `Epoch ${epoch + 1}/100 — held-out accuracy (last 15% of each sign's takes): ${acc}%`;
         }
       }
     });
+  } catch (e) {
+    console.error('[trainer] training failed:', e);
+    statusEl.textContent = `Training failed: ${e?.message ?? e}`;
+    checkTrainable();
+    return;
   } finally {
-    xs.dispose();
-    ys.dispose();
+    [xs, ys, xvs, yvs].forEach(t => t.dispose());
   }
 
   statusEl.textContent = 'Training complete! Save the model.';
@@ -369,27 +380,37 @@ async function saveModel() {
   console.log('[trainer] model saved');
 }
 
+function setStatus(msg) {
+  const el = document.getElementById('train-status');
+  if (el) el.textContent = msg;
+}
+
 function exportData() {
   const blob = new Blob([JSON.stringify(samples)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href = url; a.download = `naruto-samples-${Date.now()}.json`;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);   // revoking immediately can cancel the download
 }
 
 function importData(file) {
   const reader = new FileReader();
   reader.onload = async e => {
-    const imported = JSON.parse(e.target.result);
-    Object.entries(imported).forEach(([id, arr]) => {
-      samples[id] = [...(samples[id] || []), ...arr];
-    });
-    for (const s of SIGNS) {
-      if (db) await dbSave(db, s.id, samples[s.id]);
-    }
+    let parsed;
+    try { parsed = JSON.parse(e.target.result); }
+    catch { setStatus(`Import failed: ${file.name} is not valid JSON.`); return; }
+    const r = validateImport(parsed);
+    if (!r.ok) { setStatus(`Import failed: ${r.errors.join('; ')}`); return; }
+    Object.entries(r.cleaned).forEach(([id, arr]) => { samples[id] = [...(samples[id] || []), ...arr]; });
+    try {
+      for (const s of SIGNS) if (db) await dbSave(db, s.id, samples[s.id]);
+    } catch (err) { console.error('[trainer] could not persist import:', err); }
     updateAllCounts();
-    console.log('[trainer] data imported');
+    setStatus(`Imported ${r.added} samples from ${file.name}` +
+      (r.dropped ? ` (${r.dropped} malformed skipped)` : '') +
+      (r.errors.length ? ` — ${r.errors.join('; ')}` : '') +
+      '. Note: importing the same file twice adds its samples twice.');
   };
   reader.readAsText(file);
 }
@@ -409,6 +430,7 @@ document.getElementById('btn-import-data').addEventListener('click', () =>
   document.getElementById('import-input').click());
 document.getElementById('import-input').addEventListener('change', e => {
   if (e.target.files[0]) importData(e.target.files[0]);
+  e.target.value = '';   // allow re-importing the same file name
 });
 document.getElementById('btn-clear').addEventListener('click', clearAll);
 

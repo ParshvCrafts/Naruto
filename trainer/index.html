@@ -79,7 +79,7 @@
         </label>
       </div>
 
-      <p id="train-status" class="status">Collect ≥150 samples per class, then train.</p>
+      <p id="train-status" class="status">Collect ≥150 samples per sign (300 for None), then train.</p>
       <div class="conf-bar-wrap">
         <div class="conf-bar"><div id="conf-fill" class="conf-fill"></div></div>
         <span id="conf-label">0%</span>
@@ -104,6 +104,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1675471629/holistic.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js"></script>
-  <script src="trainer.js"></script>
+  <script type="module" src="trainer.js"></script>
 </body>
 </html>

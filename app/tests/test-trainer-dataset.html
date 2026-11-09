@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Trainer dataset Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+  </style>
+</head>
+<body>
+<h1>trainer/dataset.js — hold-out split, train-only augmentation, import validation</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import { splitHoldout, augment, validateImport, VEC_LEN } from '../../trainer/dataset.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+// vec(k) = a 126-vector whose first value encodes its recording index k.
+const vec = k => { const v = new Array(VEC_LEN).fill(0); v[0] = k; return v; };
+
+// ── splitHoldout: last 15% of each class, in recording order ─────────────────
+{ const s = { 0: Array.from({ length: 100 }, (_, i) => vec(i)), 5: Array.from({ length: 20 }, (_, i) => vec(i)) };
+  const { train, val } = splitHoldout(s, 0.15);
+  assert('S1: class 0 → 85 train', train.filter(r => r.y === 0).length, 85);
+  assert('S2: class 0 → 15 val', val.filter(r => r.y === 0).length, 15);
+  assert('S3: val rows are the LAST recordings (min index 85)',
+    Math.min(...val.filter(r => r.y === 0).map(r => r.x[0])), 85);
+  assert('S4: train rows are the FIRST recordings (max index 84)',
+    Math.max(...train.filter(r => r.y === 0).map(r => r.x[0])), 84);
+  assert('S5: class 5 (20 samples) → 3 val', val.filter(r => r.y === 5).length, 3);
+  assert('S6: empty classes contribute nothing', train.filter(r => r.y === 1).length + val.filter(r => r.y === 1).length, 0); }
+{ const { train, val } = splitHoldout({ 2: [vec(0)] }, 0.15);
+  assert('S7: a single sample stays in train', train.length * 10 + val.length, 10); }
+{ const { val } = splitHoldout({ 2: [vec(0), vec(1)] }, 0.15);
+  assert('S8: at least 1 val sample once a class has 2+', val.length, 1); }
+
+// ── augment: copies + bounded jitter, labels preserved ───────────────────────
+{ let n = 0; const rng = () => [0, 1, 0.5][n++ % 3];          // deterministic: -1, +1, 0 → ×jitter
+  const rows = augment([{ x: [1, 1], y: 7 }], 3, 0.02, rng);
+  assert('A1: 1 row × (1 + 3 copies) = 4', rows.length, 4);
+  assert('A2: original kept first, unchanged', rows[0].x[0], 1);
+  assert('A3: labels preserved', rows.every(r => r.y === 7), true);
+  assert('A4: jitter within ±0.02', rows.every(r => r.x.every(v => Math.abs(v - 1) <= 0.0200001)), true);
+  assert('A5: copies differ from original', rows[1].x[0] !== 1, true); }
+{ const rows = augment([{ x: [0], y: 1 }, { x: [0], y: 2 }], 0);
+  assert('A6: copies=0 is identity', rows.length, 2); }
+
+// ── validateImport ───────────────────────────────────────────────────────────
+{ const r = validateImport({ '0': [vec(1), vec(2)], '13': [vec(3)] });
+  assert('V1: valid file ok', r.ok, true);
+  assert('V2: counts added', r.added, 3); }
+{ const r = validateImport({ '0': [vec(1), [1, 2, 3], vec(NaN)] });
+  assert('V3: wrong-length and NaN vectors dropped', r.dropped, 2);
+  assert('V4: good one kept', r.cleaned[0].length, 1); }
+{ const r = validateImport({ '99': [vec(1)], 'abc': [] });
+  assert('V5: unknown classes rejected → not ok', r.ok, false);
+  assert('V6: errors name the bad keys', r.errors.join('|').includes('"99"'), true); }
+assert('V7: array instead of object → not ok', validateImport([vec(1)]).ok, false);
+assert('V8: null → not ok', validateImport(null).ok, false);
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>
