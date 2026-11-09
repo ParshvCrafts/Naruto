@@ -36,6 +36,7 @@ export default class HUD {
   constructor() {
     this._chakraColor = CHAKRA_DEFAULT;
     this._bottomInset = 0;     // canvas px covered by the DOM controls bar (0 in demo mode)
+    this._bot         = 0;     // effective bottom inset this frame (controls bar or letterbox)
     this._char        = null;  // { id, name, img } for the character chip (S18)
     this._charImgs    = {};    // id → HTMLImageElement
     this._hints       = null;  // idle hint lines to cycle, or null
@@ -106,6 +107,11 @@ export default class HUD {
     const w = hudCanvas.width, h = hudCanvas.height;
     const S = h / REF_H;   // resolution-independent scale for every px metric
     ctx.clearRect(0, 0, w, h);
+    // Letterbox bars ('B') cover the frame edges: keep every HUD element inside them.
+    const bar = this._letterbox ? Math.max(0, (h - w / DEMO.LETTERBOX_ASPECT) / 2) : 0;
+    this._bot = Math.max(this._bottomInset, bar);   // bottom-anchored elements sit above this
+    ctx.save();
+    ctx.translate(0, bar);                          // top-anchored elements start below the bar
 
     // Character chip (top-right) + activation splash below it
     const chipBottom = this._drawCharacterChip(ctx, w, S);
@@ -117,6 +123,7 @@ export default class HUD {
     if (dc >= 0 && dc <= 14 && dc !== 13 && dcf >= 0.5) {
       this._drawSignDisplay(ctx, dc, dcf, S);
     }
+    ctx.restore();
 
     // Sequence panel (bottom)
     this._drawSequencePanel(ctx, w, h, seqState, S);
@@ -130,6 +137,8 @@ export default class HUD {
     else if (this._hints) this._drawIdleHints(ctx, w, h, S);
 
     // Jutsu banner (armed/ready prompt or active label) — Rasengan or Chidori
+    ctx.save();
+    ctx.translate(0, bar);   // banner + debug strip are top-anchored too
     if (this._rasenganArmed || this._rasenganActive) {
       this._drawJutsuBanner(ctx, w, h, S,
         this._rasenganActive ? 'RASENGAN' : 'RASENGAN ARMED — open right palm',
@@ -146,10 +155,10 @@ export default class HUD {
 
     // Debug strip (top-center): state name + last errors (§F)
     if (this._debug) this._drawDebugStrip(ctx, w, fps, S);
+    ctx.restore();
 
-    // Cinematic letterbox bars (S19, 'B'): drawn last so they frame everything.
-    if (this._letterbox) {
-      const bar = Math.max(0, (h - w / DEMO.LETTERBOX_ASPECT) / 2);
+    // Cinematic letterbox bars (S19, 'B'): drawn last; HUD elements were placed inside them.
+    if (bar > 0) {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, w, bar);
       ctx.fillRect(0, h - bar, w, bar);
@@ -210,8 +219,13 @@ export default class HUD {
     ctx.font         = `bold ${15 * S}px monospace`;
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'alphabetic';
-    const tw = ctx.measureText(msg).width;
-    const px = w / 2, py = h - this._bottomInset - 24 * S;
+    let tw = ctx.measureText(msg).width;
+    const maxW = w - 48 * S;                       // narrow/portrait windows: shrink to fit
+    if (tw > maxW) {
+      ctx.font = `bold ${15 * S * maxW / tw}px monospace`;
+      tw = ctx.measureText(msg).width;
+    }
+    const px = w / 2, py = h - this._bot - 24 * S;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     roundRect(ctx, px - tw / 2 - 14 * S, py - 22 * S, tw + 28 * S, 32 * S, 8 * S);
     ctx.fill();
@@ -227,10 +241,10 @@ export default class HUD {
     ctx.textAlign    = 'right';
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle    = 'rgba(0,0,0,0.45)';
-    ctx.fillText(`${fps} fps`, w - 10 * S, h - this._bottomInset - 12 * S);
+    ctx.fillText(`${fps} fps`, w - 10 * S, h - this._bot - 12 * S);
     ctx.fillStyle    = color;
     ctx.globalAlpha  = 0.7;
-    ctx.fillText(`${fps} fps`, w - 10 * S, h - this._bottomInset - 12 * S);
+    ctx.fillText(`${fps} fps`, w - 10 * S, h - this._bot - 12 * S);
     ctx.restore();
   }
 
@@ -370,7 +384,7 @@ export default class HUD {
     const cardW  = 64 * S, cardH = 80 * S, gap = 8 * S;
     const totalW = cards.length * (cardW + gap) - gap + 40 * S;
     const panelX = (w - totalW) / 2;
-    const panelY = h - this._bottomInset - cardH - 30 * S;
+    const panelY = h - this._bot - cardH - 30 * S;
 
     ctx.save();
     // Panel background
