@@ -6,7 +6,7 @@
   <title>Naruto Jutsu</title>
   <link rel="icon" href="data:,">  <!-- no favicon request (keeps the console 404-free) -->
   <!-- Single stylesheet (B17: inline critical CSS removed). serve.py sends no-cache. -->
-  <link rel="stylesheet" href="app.css?v=5">
+  <link rel="stylesheet" href="app.css?v=6">
 </head>
 <body>
   <div class="app-container">
@@ -15,6 +15,16 @@
       <video id="video" autoplay playsinline muted></video>
       <canvas id="canvas"></canvas>        <!-- main effects canvas -->
       <canvas id="hud-canvas"></canvas>    <!-- HUD overlay (separate z-layer) -->
+
+      <!-- Startup / failure messages (loading, offline, camera blocked or lost, no model) -->
+      <div id="status-overlay" class="busy" role="status" aria-live="polite" data-tone="info">
+        <div class="so-card">
+          <div class="so-spinner" aria-hidden="true"></div>
+          <div class="so-title">Loading ninja tools…</div>
+          <div class="so-detail">Downloading hand-tracking models (the first load can take ~10 s).</div>
+          <button class="so-action ctrl-btn" hidden></button>
+        </div>
+      </div>
 
       <!-- Controls float as an overlay at the bottom -->
       <div class="controls">
@@ -30,7 +40,7 @@
             <option value="#F1C40F">Gold</option>
           </select>
         </label>
-        <span id="model-status" class="status-text">Loading model…</span>
+        <span id="model-status" class="status-text" role="status">Loading model…</span>
       </div>
     </div>
   </div>

@@ -10,17 +10,20 @@ import SignRefinement    from './modules/sign-refinement.js';
 import GestureClassifier, { mouthAspectRatio } from './modules/gesture-classifier.js';
 import CharacterSelect   from './modules/character-select.js';
 import { isReleaseSign, SpeechListener } from './modules/release-detector.js';
-import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, PERF, cameraDims } from './modules/config.js';
+import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, PERF, CAMERA, cameraDims } from './modules/config.js';
 import { log } from './modules/log.js';
 import AppState, { Mode } from './modules/app-state.js';
 import DebugInput, { SEAL_KEYMAP } from './modules/debug-input.js';
 import PalmReleaseTracker from './modules/palm-release.js';
+import StatusOverlay from './modules/status-overlay.js';
+import { FrameWatchdog, FpsFallback, describeCameraError } from './modules/camera-health.js';
 
 const video       = document.getElementById('video');
 const canvas      = document.getElementById('canvas');
 const hudCanvas   = document.getElementById('hud-canvas');
 const canvasWrap  = document.querySelector('.canvas-wrap');
 const modelStatus = document.getElementById('model-status');
+const overlay     = new StatusOverlay(document.getElementById('status-overlay'));
 
 // Match the letterbox wrapper's aspect ratio to the REAL camera aspect (S12/§E),
 // so canvas px ↔ CSS px is a pure uniform scale — no object-fit crop or stretch.
@@ -72,13 +75,28 @@ const SPEECH_ENABLED = (() => {
 })();
 
 async function init() {
-  // Load trained model
+  overlay.show({ id: 'loading', title: 'Loading ninja tools…', busy: true,
+    detail: 'Downloading hand-tracking models (the first load can take ~10 s).' });
+
+  // The vision libraries come from a CDN (index.html). Offline or blocked → say so.
+  const missing = ['tf', 'Holistic', 'SelfieSegmentation', 'Camera'].filter(g => typeof window[g] === 'undefined');
+  if (missing.length) {
+    log.error('app', `CDN libraries missing: ${missing.join(', ')}`);
+    overlay.show({ id: 'libs', tone: 'error', title: 'Could not load the vision libraries',
+      detail: 'They download from cdn.jsdelivr.net. Check your internet connection, then Retry.',
+      action: 'Retry', onAction: () => location.reload() });
+    return;
+  }
+
+  // Load trained model. Without it seal jutsu can't fire, but gestures still work.
+  let modelMissing = false;
   try {
     await detector.load('../models/gesture-model.json');
     modelStatus.textContent = 'Model loaded ✓';
   } catch (e) {
-    modelStatus.textContent = 'No model found — run trainer first';
-    console.warn('[app] model not loaded:', e.message);
+    modelMissing = true;
+    modelStatus.textContent = 'No seal model — run the trainer';
+    log.warn('app', `model not loaded: ${e?.message ?? e}`);
   }
 
   // Preload smoke images + sounds + video sprites. A failed asset degrades one effect;
@@ -211,18 +229,42 @@ async function init() {
 
   // FPS tracking
   let _lastFrameTs = 0;
+  const watchdog = new FrameWatchdog(CAMERA.LOST_MS);
+  let fpsFallback = null;       // set per camera start (only when running above 720p)
+  let fallbackPending = false;  // fps too low → switch at the next IDLE frame
+  let sendErrors = 0;           // consecutive Holistic failures
+  let modelWarned = false;
   let _fpsAvg = 0;   // EMA-smoothed fps (the instantaneous 1000/dt jumps every frame)
   let _fps = 0;      // rounded value shown in the HUD
 
   // Per-frame pipeline
   function onResults(results) {
     const _now = performance.now();
+    watchdog.frame(_now);
+    sendErrors = 0;
+    if (overlay.current === 'loading' || overlay.current === 'camera-lost' || overlay.current === 'tracking') {
+      overlay.hide();
+      if (modelMissing && !modelWarned) {
+        modelWarned = true;
+        overlay.show({ id: 'model', tone: 'warn', title: 'Hand-sign model not found',
+          detail: 'Seal jutsu need models/gesture-model.json (train one at /trainer/). ' +
+                  'The carousel, Rasengan and keyboard controls still work.',
+          action: 'Continue', onAction: () => overlay.hide('model') });
+      }
+    }
     const _dt = _now - _lastFrameTs;
     // A long gap (tab hidden, camera stall) is not a frame-rate sample: skip it.
     if (_lastFrameTs > 0 && _dt > 0 && _dt < 1000) {
       const inst = 1000 / _dt;
       _fpsAvg = _fpsAvg ? _fpsAvg + PERF.FPS_EMA * (inst - _fpsAvg) : inst;
       _fps = Math.round(_fpsAvg);
+    }
+    // 1080p too slow on this machine → drop to 720p, but only at a calm moment (IDLE),
+    // never mid-jutsu (a camera restart freezes the picture for ~1 s).
+    if (fpsFallback?.step(_now, _fps)) fallbackPending = true;
+    if (fallbackPending && state.is(Mode.IDLE)) {
+      fallbackPending = false;
+      setTimeout(() => fallbackTo720(), 0);   // not from inside Holistic's own callback
     }
     _lastFrameTs = _now;
     const vw = video.videoWidth, vh = video.videoHeight;
@@ -537,7 +579,8 @@ async function init() {
   // Test/debug hook — only under ?debug=1. Lets headless tests read live state.
   if (log.debugEnabled) {
     window.__naruto = { state, engine, cs, fx, gc, hud, debug, Mode,
-      char: () => selectedCharacter, seq: () => engine.getSequenceState() };
+      char: () => selectedCharacter, seq: () => engine.getSequenceState(),
+      perf: () => ({ fps: _fps, dims, fallbackArmed: !!fpsFallback, fallbackPending }) };
   }
 
   // ── Record button — resume AudioContext (autoplay policy) on first click ────
@@ -623,23 +666,93 @@ async function init() {
     }
   });
 
-  // ── Start camera (after all handlers registered so UI works even on failure) ─
-  const dims = cameraDims();
-  const camera = new Camera(video, {
-    onFrame: async () => { await holistic.send({ image: video }); },
-    width: dims.width, height: dims.height
-  });
-  try {
-    await camera.start();
-    // Log ACTUAL negotiated resolution vs requested — cameras often ignore the hint,
-    // and HUD/effects scaling (S12) depends on the real backing-store size.
-    log.info('app', `camera requested ${dims.width}×${dims.height}, ` +
-      `actual ${video.videoWidth || '?'}×${video.videoHeight || '?'}`);
-    updateAspect(video.videoWidth, video.videoHeight);
-  } catch (err) {
-    modelStatus.textContent = `Camera unavailable: ${err.message}`;
-    log.error('app', `camera failed to start: ${err?.message ?? err}`);
+  // ── Camera session (after all handlers registered so UI works even on failure) ─
+  // start / retry on error / reconnect when frames stop / one-time 720p fallback.
+  let camera = null;
+  let dims = cameraDims();
+  let starting = false;
+
+  async function startCamera() {
+    if (starting) return false;
+    starting = true;
+    try { camera?.stop(); } catch { /* already stopped */ }
+    camera = new Camera(video, {
+      onFrame: async () => {
+        try {
+          await holistic.send({ image: video });
+        } catch (err) {
+          // A failing frame must not kill the loop; persistent failure gets an overlay.
+          log.throttled('holistic', 2000, `tracking failed: ${err?.message ?? err}`);
+          if (++sendErrors === CAMERA.SEND_ERRORS_MAX) {
+            overlay.show({ id: 'tracking', tone: 'error', title: 'Hand tracking stopped working',
+              detail: 'Reload the page. If it keeps happening, try Chrome or Edge with hardware acceleration on.',
+              action: 'Reload', onAction: () => location.reload() });
+          }
+        }
+      },
+      width: dims.width, height: dims.height,
+    });
+    try {
+      await camera.start();
+      // Log ACTUAL negotiated resolution vs requested — cameras often ignore the hint,
+      // and HUD/effects scaling (S12) depends on the real backing-store size.
+      log.info('app', `camera requested ${dims.width}×${dims.height}, ` +
+        `actual ${video.videoWidth || '?'}×${video.videoHeight || '?'}`);
+      updateAspect(video.videoWidth, video.videoHeight);
+      fpsFallback = (CAMERA.AUTO_FALLBACK && dims.height > CAMERA.HEIGHT)
+        ? new FpsFallback(CAMERA.FALLBACK, performance.now()) : null;
+      return true;
+    } catch (err) {
+      const d = describeCameraError(err);
+      modelStatus.textContent = d.title;
+      log.error('app', `camera failed to start: ${err?.name ?? ''} ${err?.message ?? err}`);
+      overlay.show({ id: 'camera', tone: 'error', title: d.title, detail: d.detail,
+        action: 'Retry', onAction: () => {
+          overlay.show({ id: 'loading', title: 'Starting camera…', busy: true });
+          startCamera();
+        } });
+      return false;
+    } finally {
+      starting = false;
+    }
   }
+
+  async function fallbackTo720() {
+    dims = { width: CAMERA.WIDTH, height: CAMERA.HEIGHT };
+    log.warn('app', `fps below ${CAMERA.FALLBACK.MIN_FPS} at 1080p → switching camera to 720p`);
+    await startCamera();
+  }
+
+  // Watchdog: frames stopped while the tab is visible (camera unplugged, driver hiccup,
+  // another app grabbed it) → show "reconnecting" and retry until frames return.
+  let lastRetry = 0;
+  setInterval(() => {
+    const now = performance.now();
+    // Errors that a camera restart can't fix keep their own message.
+    if (starting || ['camera', 'tracking', 'fatal'].includes(overlay.current) ||
+        !watchdog.isLost(now, document.hidden)) return;
+    // A live, unmuted track means the camera itself is fine: frames are only slow (heavy
+    // load, model warm-up), so wait much longer before treating the pipeline as stalled.
+    const track = video.srcObject?.getVideoTracks?.()[0];
+    const cameraAlive = !!track && track.readyState === 'live' && !track.muted;
+    if (cameraAlive && overlay.current !== 'camera-lost' &&
+        watchdog.sinceLastFrame(now) < CAMERA.STALL_MS) return;
+    if (overlay.current !== 'camera-lost') {
+      log.warn('app', cameraAlive ? 'tracking stalled → restarting camera'
+                                  : 'camera frames stopped → reconnecting');
+      overlay.show({ id: 'camera-lost', tone: 'warn', busy: true,
+        title: cameraAlive ? 'Restarting the camera…' : 'Camera disconnected',
+        detail: cameraAlive ? 'Tracking stopped responding; it should be back in a moment.'
+                            : 'Reconnecting… check the cable or close other apps using the camera.' });
+    }
+    if (now - lastRetry >= CAMERA.RETRY_MS) { lastRetry = now; startCamera(); }
+  }, 500);
+
+  await startCamera();
 }
 
-init().catch(console.error);
+init().catch(err => {
+  log.error('app', `startup failed: ${err?.message ?? err}`);
+  overlay.show({ id: 'fatal', tone: 'error', title: 'Something went wrong while starting',
+    detail: String(err?.message ?? err), action: 'Reload', onAction: () => location.reload() });
+});

@@ -117,7 +117,7 @@ body.demo-mode .controls {
 }
 
 .status-text {
-  color: #555;
+  color: #aaa;
   font-size: 0.8rem;
   font-family: monospace;
   margin-left: auto;
@@ -139,3 +139,44 @@ body.demo-mode #demo-hint {
   pointer-events: none;
   letter-spacing: 0.5px;
 }
+
+/* ── Status overlay (S18): loading / offline / camera blocked or lost / no model ── */
+#status-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 15;            /* above canvases, below the controls bar */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.62);
+}
+#status-overlay[hidden] { display: none; }
+.so-card {
+  max-width: 460px;
+  padding: 26px 30px;
+  border-radius: 14px;
+  background: rgba(14, 14, 22, 0.92);
+  border: 1px solid rgba(255, 107, 0, 0.45);
+  box-shadow: 0 0 32px rgba(255, 107, 0, 0.18);
+  color: #fff;
+  text-align: center;
+  font-family: system-ui, sans-serif;
+}
+#status-overlay[data-tone="error"] .so-card { border-color: rgba(248, 113, 113, 0.7); box-shadow: 0 0 32px rgba(248, 113, 113, 0.2); }
+#status-overlay[data-tone="warn"]  .so-card { border-color: rgba(250, 204, 21, 0.6);  box-shadow: 0 0 32px rgba(250, 204, 21, 0.15); }
+.so-title  { font-size: 1.15rem; font-weight: 700; margin-bottom: 8px; }
+.so-detail { font-size: 0.92rem; line-height: 1.45; color: #ddd; }
+.so-action { margin-top: 18px; }
+.so-spinner {
+  display: none;
+  width: 34px; height: 34px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 107, 0, 0.25);
+  border-top-color: #ff6b00;
+  animation: so-spin 0.9s linear infinite;
+}
+#status-overlay.busy .so-spinner { display: block; }
+@keyframes so-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .so-spinner { animation-duration: 3s; } }

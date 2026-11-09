@@ -4,9 +4,25 @@ export default class Detector {
     this.model = null;
   }
 
-  async load(modelPath) {
-    this.model = await tf.loadLayersModel(modelPath);
-    console.log('[detector] model loaded');
+  /**
+   * Load the TF.js model, retrying transient network failures with backoff
+   * (a dropped request at startup would otherwise cost the whole session its seals).
+   */
+  async load(modelPath, { attempts = 3, backoffMs = 600 } = {}) {
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        this.model = await tf.loadLayersModel(modelPath);
+        console.log('[detector] model loaded');
+        return;
+      } catch (e) {
+        lastErr = e;
+        // A missing file won't appear by retrying: fail fast on HTTP 404.
+        if (/404|not found/i.test(String(e?.message))) break;
+        if (i < attempts - 1) await new Promise(r => setTimeout(r, backoffMs * 2 ** i));
+      }
+    }
+    throw lastErr;
   }
 
   /** Normalize 21 MediaPipe 3D landmarks to 63-dim Float32Array. */

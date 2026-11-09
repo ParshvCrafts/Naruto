@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Camera health Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+  </style>
+</head>
+<body>
+<h1>FrameWatchdog + FpsFallback + describeCameraError</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import { FrameWatchdog, FpsFallback, describeCameraError } from '../modules/camera-health.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+
+// ── FrameWatchdog ─────────────────────────────────────────────────────────────
+{ const w = new FrameWatchdog(3000);
+  assert('W1: no frame yet → not lost (still starting)', w.isLost(10000, false), false);
+  w.frame(1000);
+  assert('W2: 2.9s since last frame → fine', w.isLost(3900, false), false);
+  assert('W3: 3.1s since last frame → lost', w.isLost(4100, false), true);
+  assert('W4: tab hidden → never lost (rAF paused on purpose)', w.isLost(99999, true), false);
+  w.frame(5000);
+  assert('W5: a new frame clears lost', w.isLost(5100, false), false);
+  assert('W6: sinceLastFrame measures the gap', w.sinceLastFrame(12000), 7000); }
+assert('W7: sinceLastFrame is 0 before any frame', new FrameWatchdog(3000).sinceLastFrame(5000), 0);
+
+// ── FpsFallback: fps < MIN for SUSTAIN after GRACE → want fallback (latched once) ──
+const CFG = { MIN_FPS: 20, SUSTAIN_MS: 5000, GRACE_MS: 4000 };
+{ const f = new FpsFallback(CFG, 0);
+  assert('F1: low fps inside startup grace ignored', f.step(3000, 5), false);
+  assert('F2: low fps starts the clock at 4s', f.step(4000, 12), false);
+  assert('F3: 4.9s of low fps → not yet', f.step(8900, 12), false);
+  assert('F4: 5s of sustained low fps → fallback', f.step(9000, 12), true);
+  assert('F5: latched — fires only once', f.step(20000, 5), false); }
+{ const f = new FpsFallback(CFG, 0);
+  f.step(4000, 12); f.step(7000, 12);
+  assert('F6: one good sample resets the clock', f.step(7100, 25), false);
+  assert('F7: …so 5s from the first low sample is not enough', f.step(9100, 12), false);
+  assert('F8: 5s after the reset low sample → fallback', f.step(14100, 12), true); }
+{ const f = new FpsFallback(CFG, 0);
+  assert('F9: fps 0 (no estimate yet) ignored', f.step(10000, 0), false);
+  assert('F10: still ignored later', f.step(16000, 0), false); }
+
+// ── describeCameraError: getUserMedia error → actionable message ────────────
+assert('E1: permission denied', describeCameraError({ name: 'NotAllowedError' }).kind, 'denied');
+assert('E2: no camera', describeCameraError({ name: 'NotFoundError' }).kind, 'missing');
+assert('E3: camera busy', describeCameraError({ name: 'NotReadableError' }).kind, 'busy');
+assert('E4: unknown error keeps its message',
+  describeCameraError({ name: 'Weird', message: 'boom' }).detail.includes('boom'), true);
+assert('E5: null-safe', describeCameraError(null).kind, 'unknown');
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>

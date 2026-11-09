@@ -175,6 +175,18 @@ export const CAMERA = Object.freeze({
   HEIGHT: 720,
   HD_WIDTH:  1920,  // 1080p preferred
   HD_HEIGHT: 1080,
+  // ── Robustness (S18) ──
+  LOST_MS:         3000,  // no processed frame this long (tab visible) → "camera lost" overlay + reconnect
+  RETRY_MS:        2500,  // reconnect attempt interval while lost
+  STALL_MS:        10000, // camera track live but no processed frame this long → restart pipeline
+  SEND_ERRORS_MAX: 30,    // consecutive tracking (Holistic) failures before showing an error overlay
+  // ── 1080p → 720p auto-fallback (owner decision 2026-11-08) ──
+  AUTO_FALLBACK:   true,
+  FALLBACK: Object.freeze({
+    MIN_FPS:    20,    // below this…
+    SUSTAIN_MS: 5000,  // …continuously for this long…
+    GRACE_MS:   6000,  // …ignoring the first seconds after camera start (models warming up)
+  }),
 });
 
 /** Requested capture dimensions per CAMERA.PREF. */
