@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>anim Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+  </style>
+</head>
+<body>
+<h1>frameK / lerpK — same animation speed at any fps</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import { frameK, lerpK, REF_FRAME_MS } from '../modules/anim.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+
+assert('K1: one 30fps frame → 1', frameK(REF_FRAME_MS), 1);
+assert('K2: 15fps frame → 2 steps', frameK(2 * REF_FRAME_MS), 2);
+assert('K3: 60fps frame → 0.5 step', frameK(REF_FRAME_MS / 2), 0.5);
+assert('K4: long gap clamped to 3', frameK(5000), 3);
+assert('K5: first frame (no dt) → 1', frameK(NaN), 1);
+assert('K6: negative dt → 1', frameK(-4), 1);
+
+// A per-frame ramp reaches the same value after the same TIME at 15 and 30 fps.
+{ let a = 0, b = 0;
+  for (let i = 0; i < 30; i++) a += 0.015 * frameK(REF_FRAME_MS);       // 1 s at 30 fps
+  for (let i = 0; i < 15; i++) b += 0.015 * frameK(2 * REF_FRAME_MS);   // 1 s at 15 fps
+  assert('R1: ramp after 1s equal at 15 and 30 fps', a.toFixed(6), b.toFixed(6)); }
+
+// Exponential settle: two 30fps steps == one 15fps step.
+{ const L = 0.28;
+  const two = 1 - (1 - L) * (1 - L);
+  assert('L1: lerpK(L, 2) == two single steps', lerpK(L, 2).toFixed(9), two.toFixed(9));
+  assert('L2: lerpK(L, 1) == L', lerpK(L, 1).toFixed(9), L.toFixed(9));
+  assert('L3: lerpK(L, 0) == 0 (no time, no move)', lerpK(L, 0), 0); }
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>

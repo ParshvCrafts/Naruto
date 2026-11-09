@@ -12,6 +12,7 @@
 //
 // Animation is fully time-based (easeOutCubic) — no lerp, no floating-point loop risk.
 
+import { frameK, lerpK } from './anim.js';
 import { CAROUSEL, CHAKRA } from './config.js';
 
 const SLIDE_IN_MS      = CAROUSEL.SLIDE_IN_MS;
@@ -197,7 +198,10 @@ export default class CharacterSelect {
           this._confirming = false;
         }
 
-        this._scrollX += (this._targetScrollX - this._scrollX) * LERP_FACTOR;
+        // Exponential settle, frame-rate independent (LERP_FACTOR is per 30fps frame).
+        const kk = frameK(this._lastLerp ? now - this._lastLerp : NaN);
+        this._lastLerp = now;
+        this._scrollX += (this._targetScrollX - this._scrollX) * lerpK(LERP_FACTOR, kk);
         break;
       }
 

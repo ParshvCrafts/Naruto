@@ -2,6 +2,7 @@
 import { log } from './log.js';
 import { RASENGAN, CHIDORI, FIREBALL, SHARINGAN, CHAKRA_DEFAULT, AUDIO } from './config.js';
 import { normGain } from './audio-norm.js';
+import { frameK } from './anim.js';
 
 /**
  * VideoFX — a looping video sprite composited with `screen` blend at a hand anchor.
@@ -39,9 +40,18 @@ export class VideoFX {
     });
   }
 
+  /** Growth steps since the previous draw (frame-rate independent, see anim.js). */
+  _stepK() {
+    const now = performance.now();
+    const k = frameK(this._lastStep ? now - this._lastStep : NaN);
+    this._lastStep = now;
+    return k;
+  }
+
   /** @returns {boolean} false if the clip failed to load (jutsu cannot show). */
   activate() {
     if (this._failed) return false;
+    this._lastStep = 0;
     this._active = true;
     this._releasing = false;
     this._scale = this._cfg.SCALE_START;
@@ -94,7 +104,7 @@ export class VideoFX {
       if (p >= 1) { this.forceStop(); return false; }
       alpha = 1 - p;
     } else if (this._scale < this._cfg.SCALE_MAX) {
-      this._scale += this._cfg.SCALE_RAMP;
+      this._scale = Math.min(this._cfg.SCALE_MAX, this._scale + this._cfg.SCALE_RAMP * this._stepK());
     }
     const vid = this._vid;
     if (!vid.videoWidth) return true;      // not decoded yet — keep alive
@@ -151,7 +161,7 @@ export class FireballFX extends VideoFX {
       if (p >= 1) { this.forceStop(); return false; }
       alpha = 1 - p;
     } else if (this._scale < this._cfg.SCALE_MAX) {
-      this._scale += this._cfg.SCALE_RAMP;
+      this._scale = Math.min(this._cfg.SCALE_MAX, this._scale + this._cfg.SCALE_RAMP * this._stepK());
     }
     const vid = this._vid;
     if (!vid.videoWidth) return true;               // not decoded yet — keep alive
@@ -402,6 +412,9 @@ export default class Effects {
     const w = canvas.width, h = canvas.height;
     // Camera not delivering frames yet (or lost): a 0×0 canvas makes drawImage throw.
     if (!w || !h || videoEl.readyState < 2) return;
+    const nowR = performance.now();
+    this._k = frameK(this._lastRender ? nowR - this._lastRender : NaN);   // steps this frame
+    this._lastRender = nowR;
 
     // Reset visual state when jutsu ends (engine reset / release complete)
     if (!jutsuActive && this._chakraActive) {
@@ -463,7 +476,7 @@ export default class Effects {
     if (this._flashOpacity > 0) {
       ctx.fillStyle = `rgba(255,255,255,${this._flashOpacity})`;
       ctx.fillRect(0, 0, w, h);
-      this._flashOpacity = Math.max(0, this._flashOpacity - 0.05);
+      this._flashOpacity = Math.max(0, this._flashOpacity - 0.05 * this._k);
     }
 
     ctx.restore();  // remove mirror transform
@@ -764,7 +777,7 @@ export default class Effects {
     if (f.length <= 386) return;
 
     const scaleIn = Math.min(1, (performance.now() - this._sharinganAt) / SHARINGAN.SCALE_IN_MS);
-    this._tomoeAngle += SHARINGAN.SPIN;
+    this._tomoeAngle += SHARINGAN.SPIN * (this._k ?? 1);
 
     for (const [key, idx] of [['r', R_EYE], ['l', L_EYE]]) {
       const [c1, c2, up, lo] = idx.map(i => f[i]);
@@ -853,10 +866,11 @@ export default class Effects {
   _updateParticles(ctx, w, h) {
     const S = h / 720;
     this._particles = this._particles.filter(p => {
-      p.x  += p.vx;
-      p.y  += p.vy;
-      p.vy += (p.gravity ?? 0.1 * S);    // gravity
-      p.life -= 0.025;
+      const k = this._k ?? 1;
+      p.x  += p.vx * k;
+      p.y  += p.vy * k;
+      p.vy += p.gravity * k;   // gravity
+      p.life -= 0.025 * k;
       if (p.life <= 0) return false;
       ctx.save();
       ctx.globalAlpha = p.life;
