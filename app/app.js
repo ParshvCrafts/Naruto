@@ -617,7 +617,18 @@ async function init() {
         detail: `${e?.message ?? e}. Try Chrome or Edge.`, action: 'OK', onAction: () => overlay.hide('record') });
     }
   });
-  window.addEventListener('beforeunload', () => recorder.stop());
+  recorder.onEnded = reason => {
+    if (!recorder.isRecording) setRecordingUI(false);   // a newer recording may already be running
+    if (reason === 'error') {
+      log.error('app', 'recording stopped by an encoder error');
+      overlay.show({ id: 'record', tone: 'warn', title: 'Recording stopped unexpectedly',
+        detail: 'What was captured so far has been downloaded.', action: 'OK', onAction: () => overlay.hide('record') });
+    }
+  };
+  // The recording lives in memory until Stop: leaving the page would lose it, so ask first.
+  window.addEventListener('beforeunload', e => {
+    if (recorder.isRecording) { e.preventDefault(); e.returnValue = ''; }
+  });
 
   // ── Demo mode — hides controls bar for clean screen recording ──────────────
   const btnDemo = document.getElementById('btn-demo');

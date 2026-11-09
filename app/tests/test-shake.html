@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Screen shake Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+  </style>
+</head>
+<body>
+<h1>shakeAt — Fireball ignition shake (±PX·S, decaying over MS, edges covered)</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import { shakeAt } from '../modules/effects.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+const CFG = { SHAKE: true, SHAKE_PX: 6, SHAKE_MS: 250 };
+const max = () => 1, min = () => 0;   // rng extremes → offset +amp / −amp
+
+assert('S1: before start / no shake → null', shakeAt(-1, CFG, 1, max), null);
+assert('S2: after duration → null', shakeAt(250, CFG, 1, max), null);
+assert('S3: disabled → null', shakeAt(10, { ...CFG, SHAKE: false }, 1, max), null);
+{ const s = shakeAt(0, CFG, 1, max);
+  assert('S4: t=0 full amplitude +6px', s.x, 6);
+  assert('S5: y too', s.y, 6); }
+assert('S6: rng 0 → −6px', shakeAt(0, CFG, 1, min).x, -6);
+assert('S7: decays linearly: half-way → 3px', shakeAt(125, CFG, 1, max).x, 3);
+assert('S8: scales with S (1080p = 1.5) → 9px', shakeAt(0, CFG, 1.5, max).x, 9);
+{ const s = shakeAt(0, CFG, 1, max, 1280, 720);
+  // zoom must cover the largest offset on the SHORT side: 1 + 2·6/720
+  assert('S9: zoom covers edges', s.k.toFixed(4), (1 + 12 / 720).toFixed(4)); }
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>

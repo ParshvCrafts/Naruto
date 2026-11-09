@@ -147,6 +147,9 @@ export const FIREBALL = Object.freeze({
   BURST_MS:     420,   // ignition front-burst full-frame flash duration
   BURST_ALPHA:  0.35,  // peak alpha of the ignition flash
   GLOW_COLOR:   '#ff7a1a', // D-03: fixed fire orange, never tinted by the chakra colour
+  SHAKE:        true,  // ignition screen shake (owner decision 2026-11-08)
+  SHAKE_PX:     6,     // peak offset at 720p (scaled by S)
+  SHAKE_MS:     250,
 });
 
 // ─── Sharingan procedural eyes (Sasuke, S18) ─────────────────────────────────

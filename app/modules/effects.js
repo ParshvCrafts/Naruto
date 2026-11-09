@@ -255,6 +255,7 @@ export default class Effects {
     this._fireball = null;
     this._arcs     = [];   // procedural lightning polylines (chidori)
     this._arcFrame = 0;
+    this._shakeStart = 0;  // Fireball ignition shake start (ms), 0 = none
 
     // Sharingan procedural eyes (S18)
     this._face          = null;   // latest Holistic faceLandmarks
@@ -301,7 +302,11 @@ export default class Effects {
   isChidoriActive()           { return !!this._chidori?.isActive(); }
 
   // ── Fireball (FireballFX) API — mouth-anchored directional flame (S17) ────────
-  fireballActivate()          { return !!this._fireball?.activate(); }
+  fireballActivate() {
+    const ok = !!this._fireball?.activate();
+    if (ok) this._shakeStart = performance.now();   // ignition shake (owner decision 2026-11-08)
+    return ok;
+  }
   fireballRelease()           { this._fireball?.release(); }
   fireballForceStop()         { this._fireball?.forceStop(); }
   setFireballAnchor(nx, ny)   { this._fireball?.setAnchor(nx, ny); }
@@ -413,6 +418,15 @@ export default class Effects {
     // MediaPipe receives the raw video DOM element — CSS/canvas transforms
     // are invisible to it. Landmark coords and detection logic are unaffected.
     ctx.save();
+    // Fireball ignition shake: whole frame jitters, zoomed just enough to hide the edges.
+    const shake = this._shakeStart ? shakeAt(performance.now() - this._shakeStart, FIREBALL, h / 720, Math.random, w, h) : null;
+    if (shake) {
+      ctx.translate(w / 2 + shake.x, h / 2 + shake.y);
+      ctx.scale(shake.k, shake.k);
+      ctx.translate(-w / 2, -h / 2);
+    } else {
+      this._shakeStart = 0;
+    }
     ctx.translate(w, 0);
     ctx.scale(-1, 1);
 
@@ -894,6 +908,18 @@ export default class Effects {
   }
 
   setChakraColor(hex) { this._chakraColor = hex; }
+}
+
+/**
+ * Screen-shake offset at `t` ms after ignition: uniform ±SHAKE_PX·S on each axis, decaying
+ * linearly to 0 over SHAKE_MS, plus the zoom `k` that keeps the frame edges covered.
+ * @returns {{x:number, y:number, k:number}|null} null when no shake applies
+ */
+export function shakeAt(t, cfg, S = 1, rng = Math.random, w = 1280, h = 720) {
+  if (!cfg.SHAKE || t < 0 || t >= cfg.SHAKE_MS) return null;
+  const amp = cfg.SHAKE_PX * S * (1 - t / cfg.SHAKE_MS);
+  const k = 1 + (2 * cfg.SHAKE_PX * S) / Math.min(w, h);
+  return { x: (rng() * 2 - 1) * amp, y: (rng() * 2 - 1) * amp, k };
 }
 
 /** Generate `n` jagged lightning polylines radiating from (cx,cy) out to ~len px. */
