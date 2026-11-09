@@ -3,7 +3,7 @@
 // S = canvas.height / 720 so the HUD keeps the SAME relative size at any camera
 // resolution (S12/§E, fixes B16). Positions are S-scaled or fraction-of-frame.
 import { log } from './log.js';
-import { HUD as HUD_CFG, CHAKRA_DEFAULT } from './config.js';
+import { HUD as HUD_CFG, CHAKRA_DEFAULT, HINTS, CHIP } from './config.js';
 
 const REF_H = HUD_CFG.REF_HEIGHT;  // reference height the raw px metrics were tuned against
 const SIGN_HYSTERESIS = HUD_CFG.SIGN_HYSTERESIS_FRAMES;  // frames before the pill switches sign
@@ -36,6 +36,10 @@ export default class HUD {
   constructor() {
     this._chakraColor = CHAKRA_DEFAULT;
     this._bottomInset = 0;     // canvas px covered by the DOM controls bar (0 in demo mode)
+    this._char        = null;  // { id, name, img } for the character chip (S18)
+    this._charImgs    = {};    // id → HTMLImageElement
+    this._hints       = null;  // idle hint lines to cycle, or null
+    this._hintsSince  = 0;     // when the current hint list started showing
     this._splash      = null;  // { text, startTime }
     this._signImgs    = {};    // classId → HTMLImageElement (loaded lazily)
     this._imgBase     = '../assets/signs';  // B3: was '/assets/signs' (absolute → 404 off-root)
@@ -103,8 +107,9 @@ export default class HUD {
     const S = h / REF_H;   // resolution-independent scale for every px metric
     ctx.clearRect(0, 0, w, h);
 
-    // Activation splash — top-right corner
-    this._drawActivationSplash(ctx, w, S);
+    // Character chip (top-right) + activation splash below it
+    const chipBottom = this._drawCharacterChip(ctx, w, S);
+    this._drawActivationSplash(ctx, w, S, chipBottom);
 
     // Sign display (top-left) — debounced through hysteresis to kill flicker
     this._stabilizeSign(Number.isInteger(classId) ? classId : 13, confidence);
@@ -119,8 +124,10 @@ export default class HUD {
     // FPS counter (bottom-right)
     if (fps > 0 && !this._demo) this._drawFPS(ctx, w, h, fps, S);   // no fps counter in demo recordings
 
-    // Character-selection hint (bottom-center) when nothing is confirmed
-    if (this._charHint) this._drawCharHint(ctx, w, h, S);
+    // Character-selection hint (bottom-center) when nothing is confirmed,
+    // otherwise cycling "how to cast" hints while idle (S18)
+    if (this._charHint) this._drawHintPill(ctx, w, h, S, 'Make fists with both hands to choose a character', 1);
+    else if (this._hints) this._drawIdleHints(ctx, w, h, S);
 
     // Jutsu banner (armed/ready prompt or active label) — Rasengan or Chidori
     if (this._rasenganArmed || this._rasenganActive) {
@@ -188,9 +195,10 @@ export default class HUD {
     ctx.restore();
   }
 
-  _drawCharHint(ctx, w, h, S) {
-    const msg = 'Make fists with both hands to choose a character';
+  /** Bottom-center message pill (white text on a dark pill, D-03). */
+  _drawHintPill(ctx, w, h, S, msg, alpha) {
     ctx.save();
+    ctx.globalAlpha  = alpha;
     ctx.font         = `bold ${15 * S}px monospace`;
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'alphabetic';
@@ -289,7 +297,7 @@ export default class HUD {
     ctx.restore();
   }
 
-  _drawActivationSplash(ctx, w, S) {
+  _drawActivationSplash(ctx, w, S, chipBottom = 0) {
     if (!this._splash) return;
     const elapsed = performance.now() - this._splash.startTime;
     let alpha;
@@ -303,7 +311,7 @@ export default class HUD {
 
     const pillW = 260 * S, pillH = 78 * S;
     const x = w - pillW - 10 * S;
-    const y = 8 * S;
+    const y = (chipBottom || 0) + 8 * S;
 
     ctx.save();
     ctx.globalAlpha  = alpha;
@@ -416,6 +424,70 @@ export default class HUD {
   }
 
   setChakraColor(hex) { this._chakraColor = hex; }
+
+  /** Character chip (S18): id 'naruto'|'sasuke'|null; portrait loaded from imgBase. */
+  setCharacter(id, imgBase = '../assets/characters') {
+    if (!id) { this._char = null; return; }
+    if (!this._charImgs[id]) {
+      const img = new Image();
+      img.src = `${imgBase}/${id}.jpg`;
+      this._charImgs[id] = img;
+    }
+    this._char = { id, name: id.toUpperCase(), img: this._charImgs[id] };
+  }
+
+  /** Idle "how to cast" hints (S18): a list to cycle, or null to hide. */
+  setIdleHints(list) {
+    if (list === this._hints) return;
+    this._hints = list && list.length ? list : null;
+    this._hintsSince = performance.now();
+  }
+
+  _drawIdleHints(ctx, w, h, S) {
+    const t = performance.now() - this._hintsSince - HINTS.DELAY_MS;
+    if (t < 0) return;                                   // don't flash between jutsu
+    const i = Math.floor(t / HINTS.CYCLE_MS) % this._hints.length;
+    const p = t % HINTS.CYCLE_MS;
+    const f = HINTS.FADE_MS;
+    const alpha = Math.min(1, p / f, (HINTS.CYCLE_MS - p) / f) * HINTS.ALPHA;
+    this._drawHintPill(ctx, w, h, S, this._hints[i], alpha);
+  }
+
+  /** @returns {number} bottom y of the chip (0 when no chip) */
+  _drawCharacterChip(ctx, w, S) {
+    const c = this._char;
+    if (!c) return 0;
+    const r  = CHIP.RADIUS * S;
+    const cx = w - 10 * S - r, cy = 10 * S + r;
+    ctx.save();
+    // name pill to the left of the portrait — white text, chakra only on the ring/glow
+    ctx.font = `bold ${14 * S}px monospace`;
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    const tw = ctx.measureText(c.name).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    roundRect(ctx, cx - r - tw - 26 * S, cy - 14 * S, tw + 24 * S + r, 28 * S, 14 * S);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(c.name, cx - r - 12 * S, cy + 1 * S);
+    // portrait clipped to a circle
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#111'; ctx.fill();
+    if (c.img.complete && c.img.naturalWidth) {
+      ctx.save(); ctx.clip();
+      const iw = c.img.naturalWidth, ih = c.img.naturalHeight, side = Math.min(iw, ih);
+      ctx.drawImage(c.img, (iw - side) / 2, 0, side, side, cx - r, cy - r, 2 * r, 2 * r);
+      ctx.restore();
+    }
+    // chakra ring with a soft pulse
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / CHIP.PULSE_MS * Math.PI * 2);
+    ctx.lineWidth   = CHIP.RING * S;
+    ctx.strokeStyle = this._chakraColor;
+    ctx.shadowColor = this._chakraColor;
+    ctx.shadowBlur  = (8 + 8 * pulse) * S;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    return cy + r;
+  }
 
   /** Keep bottom-anchored HUD elements above the DOM controls bar. @param {number} px canvas px */
   setBottomInset(px) { this._bottomInset = Math.max(0, px || 0); }

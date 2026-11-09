@@ -228,6 +228,32 @@ export const RECORD = Object.freeze({
   VIDEO_BPS: 8_000_000,     // ~8 Mbps: crisp 1080p effects without huge files
 });
 
+// ─── Idle hints + character chip (S18) ───────────────────────────────────────
+// Shown in IDLE once a character is chosen: cycle through how to cast that character's
+// jutsu. Short, white text on a dark pill (D-03). Keyboard fallbacks are in the README.
+export const HINTS = Object.freeze({
+  DELAY_MS: 1500,   // idle this long before hints appear (no flashing between jutsu)
+  CYCLE_MS: 4500,   // each hint stays this long
+  FADE_MS:  400,
+  ALPHA:    0.9,
+  naruto: Object.freeze([
+    'Shadow Clone: hold the cross seal (Kage Bunshin)',
+    'Rasengan: left hand two fingers up, then open your right palm',
+    'Release: left hand two fingers up while the clones are out',
+    'Change character: make two fists',
+  ]),
+  sasuke: Object.freeze([
+    'Chidori: Ox → Hare → Monkey, then open your right palm',
+    'Fireball: Serpent → Ram → Monkey → Boar → Horse → Tiger, then open your mouth',
+    'Change character: make two fists',
+  ]),
+});
+export const CHIP = Object.freeze({
+  RADIUS:   26,     // px at 720p (× S)
+  RING:     3,
+  PULSE_MS: 1600,
+});
+
 // ─── Performance ──────────────────────────────────────────────────────────────
 export const PERF = Object.freeze({
   FPS_EMA: 0.1,   // smoothing for the fps estimate (HUD counter + 720p auto-fallback gauge)
@@ -241,6 +267,6 @@ export const HUD = Object.freeze({
 
 // Frozen aggregate for convenient default import.
 const config = Object.freeze({
-  CHAKRA, CHAKRA_DEFAULT, ENGINE, SEQUENCES, REFINE, CAROUSEL, GESTURE, RELEASE, CAMERA, HUD, PERF, AUDIO, RECORD,
+  CHAKRA, CHAKRA_DEFAULT, ENGINE, SEQUENCES, REFINE, CAROUSEL, GESTURE, RELEASE, CAMERA, HUD, PERF, AUDIO, RECORD, HINTS, CHIP,
 });
 export default config;

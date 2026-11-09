@@ -10,7 +10,7 @@ import SignRefinement    from './modules/sign-refinement.js';
 import GestureClassifier, { mouthAspectRatio } from './modules/gesture-classifier.js';
 import CharacterSelect   from './modules/character-select.js';
 import { isReleaseSign, SpeechListener } from './modules/release-detector.js';
-import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, PERF, CAMERA, SHARINGAN, cameraDims } from './modules/config.js';
+import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, PERF, CAMERA, SHARINGAN, HINTS, cameraDims } from './modules/config.js';
 import { log } from './modules/log.js';
 import AppState, { Mode } from './modules/app-state.js';
 import DebugInput, { SEAL_KEYMAP } from './modules/debug-input.js';
@@ -138,6 +138,7 @@ async function init() {
     const color = char === 'sasuke' ? CHAKRA.sasuke : char === 'naruto' ? CHAKRA.naruto : chakraSelect.value;
     fx.setChakraColor(color);
     hud.setChakraColor(color);
+    hud.setCharacter(char);
     chakraSelect.disabled = !!char;
     // The character's theme owns the colour; showing a stale picker value would mislead.
     const label = chakraSelect.closest('label');
@@ -557,6 +558,7 @@ async function init() {
     // ── Rendering ─────────────────────────────────────────────────────────────────
     // B8: prompt the user to pick a character when none is confirmed (and carousel closed).
     hud.setCharacterHint(!cs.hasConfirmed() && !cs.isActive());
+    hud.setIdleHints(state.is(Mode.IDLE) && selectedCharacter ? HINTS[selectedCharacter] ?? null : null);
     hud.setDebugMode(log.debugEnabled, state.mode);
     hud.setRasenganState(state.is(Mode.RASENGAN_ARMED), fx.isRasenganActive());
     hud.setChidoriState(state.is(Mode.CHIDORI_READY), fx.isChidoriActive());
