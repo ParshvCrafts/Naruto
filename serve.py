@@ -8,6 +8,11 @@ import http.server
 PORT = 8765
 
 class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
+    # Keep-alive: one connection serves many requests. With HTTP/1.0 every asset opened
+    # a new TCP connection, and the page's burst of parallel loads intermittently failed
+    # on Windows with net::ERR_NO_BUFFER_SPACE.
+    protocol_version = 'HTTP/1.1'
+
     def end_headers(self):
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.send_header('Pragma', 'no-cache')

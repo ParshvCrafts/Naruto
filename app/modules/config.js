@@ -179,6 +179,7 @@ export const CAMERA = Object.freeze({
   LOST_MS:         3000,  // no processed frame this long (tab visible) → "camera lost" overlay + reconnect
   RETRY_MS:        2500,  // reconnect attempt interval while lost
   STALL_MS:        10000, // camera track live but no processed frame this long → restart pipeline
+  FIRST_FRAME_MS:  45000, // no first tracked frame this long after camera start → error overlay
   SEND_ERRORS_MAX: 30,    // consecutive tracking (Holistic) failures before showing an error overlay
   // ── 1080p → 720p auto-fallback (owner decision 2026-11-08) ──
   AUTO_FALLBACK:   true,

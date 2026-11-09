@@ -50,11 +50,24 @@
 
   <!-- CDN libraries (globals: Holistic, SelfieSegmentation, Camera, tf) -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1675471629/holistic.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/selfie_segmentation.js"></script>
 
+  <!-- Boot guard: if app.js (or one of its modules) fails to load, the module never runs
+       and the loading card would spin forever. Plain script, so it runs regardless. -->
+  <script>
+    setTimeout(function () {
+      if (window.__narutoBooted) return;
+      var o = document.getElementById('status-overlay');
+      if (!o) return;
+      o.hidden = false; o.classList.remove('busy'); o.dataset.tone = 'error';
+      o.querySelector('.so-title').textContent = 'The app did not start';
+      o.querySelector('.so-detail').textContent = 'A file failed to load. Check your connection and reload.';
+      var b = o.querySelector('.so-action');
+      b.hidden = false; b.textContent = 'Reload'; b.onclick = function () { location.reload(); };
+    }, 25000);
+  </script>
   <!-- Main app (ES6 module) -->
   <script type="module" src="app.js"></script>
 </body>

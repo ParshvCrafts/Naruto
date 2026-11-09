@@ -15,6 +15,7 @@ import { log } from './modules/log.js';
 import AppState, { Mode } from './modules/app-state.js';
 import DebugInput, { SEAL_KEYMAP } from './modules/debug-input.js';
 import PalmReleaseTracker from './modules/palm-release.js';
+import CameraLoop from './modules/camera-loop.js';
 import StatusOverlay from './modules/status-overlay.js';
 import { FrameWatchdog, FpsFallback, describeCameraError } from './modules/camera-health.js';
 
@@ -75,11 +76,12 @@ const SPEECH_ENABLED = (() => {
 })();
 
 async function init() {
+  window.__narutoBooted = true;   // read by the boot guard in index.html
   overlay.show({ id: 'loading', title: 'Loading ninja tools…', busy: true,
     detail: 'Downloading hand-tracking models (the first load can take ~10 s).' });
 
   // The vision libraries come from a CDN (index.html). Offline or blocked → say so.
-  const missing = ['tf', 'Holistic', 'SelfieSegmentation', 'Camera'].filter(g => typeof window[g] === 'undefined');
+  const missing = ['tf', 'Holistic', 'SelfieSegmentation'].filter(g => typeof window[g] === 'undefined');
   if (missing.length) {
     log.error('app', `CDN libraries missing: ${missing.join(', ')}`);
     overlay.show({ id: 'libs', tone: 'error', title: 'Could not load the vision libraries',
@@ -667,45 +669,55 @@ async function init() {
   });
 
   // ── Camera session (after all handlers registered so UI works even on failure) ─
-  // start / retry on error / reconnect when frames stop / one-time 720p fallback.
-  let camera = null;
+  // start / retry on error / auto-reconnect when frames stop / one-time 720p fallback.
   let dims = cameraDims();
   let starting = false;
+  let cameraStartedAt = 0;
+  const camera = new CameraLoop(video, {
+    onFrame: async () => {
+      try {
+        await holistic.send({ image: video });
+      } catch (err) {
+        // A failing frame must not kill the loop; persistent failure gets an overlay.
+        log.throttled('holistic', 2000, `tracking failed: ${err?.message ?? err}`);
+        if (++sendErrors === CAMERA.SEND_ERRORS_MAX) showTrackingError();
+      }
+    },
+  });
 
-  async function startCamera() {
+  function showTrackingError() {
+    overlay.show({ id: 'tracking', tone: 'error', title: 'Hand tracking stopped working',
+      detail: 'Reload the page. If it keeps happening, try Chrome or Edge with hardware acceleration on.',
+      action: 'Reload', onAction: () => location.reload() });
+  }
+
+  /**
+   * (Re)start the camera at `dims`. From the watchdog (auto-reconnect), a failure that
+   * may fix itself (camera still unplugged/busy) keeps the "reconnecting" overlay so
+   * retries continue; only a blocked permission needs the user and stops retrying.
+   */
+  async function startCamera({ auto = false } = {}) {
     if (starting) return false;
     starting = true;
-    try { camera?.stop(); } catch { /* already stopped */ }
-    camera = new Camera(video, {
-      onFrame: async () => {
-        try {
-          await holistic.send({ image: video });
-        } catch (err) {
-          // A failing frame must not kill the loop; persistent failure gets an overlay.
-          log.throttled('holistic', 2000, `tracking failed: ${err?.message ?? err}`);
-          if (++sendErrors === CAMERA.SEND_ERRORS_MAX) {
-            overlay.show({ id: 'tracking', tone: 'error', title: 'Hand tracking stopped working',
-              detail: 'Reload the page. If it keeps happening, try Chrome or Edge with hardware acceleration on.',
-              action: 'Reload', onAction: () => location.reload() });
-          }
-        }
-      },
-      width: dims.width, height: dims.height,
-    });
+    camera.setResolution(dims.width, dims.height);
     try {
       await camera.start();
+      cameraStartedAt = performance.now();
+      // Restarts get a fresh grace period (models are already warm, so frames come fast).
+      if (watchdog.sinceLastFrame(cameraStartedAt) > 0) watchdog.frame(cameraStartedAt);
       // Log ACTUAL negotiated resolution vs requested — cameras often ignore the hint,
       // and HUD/effects scaling (S12) depends on the real backing-store size.
       log.info('app', `camera requested ${dims.width}×${dims.height}, ` +
         `actual ${video.videoWidth || '?'}×${video.videoHeight || '?'}`);
       updateAspect(video.videoWidth, video.videoHeight);
       fpsFallback = (CAMERA.AUTO_FALLBACK && dims.height > CAMERA.HEIGHT)
-        ? new FpsFallback(CAMERA.FALLBACK, performance.now()) : null;
+        ? new FpsFallback(CAMERA.FALLBACK, cameraStartedAt) : null;
       return true;
     } catch (err) {
       const d = describeCameraError(err);
-      modelStatus.textContent = d.title;
       log.error('app', `camera failed to start: ${err?.name ?? ''} ${err?.message ?? err}`);
+      if (auto && d.kind !== 'denied') return false;   // keep "reconnecting", retry next tick
+      modelStatus.textContent = d.title;
       overlay.show({ id: 'camera', tone: 'error', title: d.title, detail: d.detail,
         action: 'Retry', onAction: () => {
           overlay.show({ id: 'loading', title: 'Starting camera…', busy: true });
@@ -714,14 +726,22 @@ async function init() {
       return false;
     } finally {
       starting = false;
+      lastRetry = performance.now();   // space retries from when the attempt ENDED
     }
   }
 
   async function fallbackTo720() {
+    if (starting) { fallbackPending = true; return; }   // try again on a later IDLE frame
     dims = { width: CAMERA.WIDTH, height: CAMERA.HEIGHT };
     log.warn('app', `fps below ${CAMERA.FALLBACK.MIN_FPS} at 1080p → switching camera to 720p`);
     await startCamera();
   }
+
+  // While the tab is hidden the browser pauses frames on purpose; coming back must not
+  // look like a lost camera. Restart the watchdog clock when the tab becomes visible.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && watchdog.sinceLastFrame(performance.now()) > 0) watchdog.frame(performance.now());
+  });
 
   // Watchdog: frames stopped while the tab is visible (camera unplugged, driver hiccup,
   // another app grabbed it) → show "reconnecting" and retry until frames return.
@@ -729,10 +749,13 @@ async function init() {
   setInterval(() => {
     const now = performance.now();
     // Errors that a camera restart can't fix keep their own message.
-    if (starting || ['camera', 'tracking', 'fatal'].includes(overlay.current) ||
-        !watchdog.isLost(now, document.hidden)) return;
+    if (starting || ['camera', 'tracking', 'fatal', 'libs'].includes(overlay.current)) return;
+    // First frame never arrived (tracking can't start on this machine/browser).
+    if (cameraStartedAt && watchdog.sinceLastFrame(now) === 0 && !document.hidden &&
+        now - cameraStartedAt > CAMERA.FIRST_FRAME_MS) { showTrackingError(); return; }
+    if (!watchdog.isLost(now, document.hidden)) return;
     // A live, unmuted track means the camera itself is fine: frames are only slow (heavy
-    // load, model warm-up), so wait much longer before treating the pipeline as stalled.
+    // load), so wait much longer before treating the pipeline as stalled.
     const track = video.srcObject?.getVideoTracks?.()[0];
     const cameraAlive = !!track && track.readyState === 'live' && !track.muted;
     if (cameraAlive && overlay.current !== 'camera-lost' &&
@@ -745,7 +768,7 @@ async function init() {
         detail: cameraAlive ? 'Tracking stopped responding; it should be back in a moment.'
                             : 'Reconnecting… check the cable or close other apps using the camera.' });
     }
-    if (now - lastRetry >= CAMERA.RETRY_MS) { lastRetry = now; startCamera(); }
+    if (now - lastRetry >= CAMERA.RETRY_MS) startCamera({ auto: true });
   }, 500);
 
   await startCamera();

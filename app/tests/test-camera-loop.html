@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CameraLoop Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+  </style>
+</head>
+<body>
+<h1>CameraLoop — one frame per new video frame, stop() really stops, restarts never stack</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import CameraLoop from '../modules/camera-loop.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+
+// Fakes: a manual frame scheduler, a video element, a getUserMedia returning stoppable tracks.
+function harness() {
+  const queue = [];
+  const sched = { request: cb => { queue.push(cb); return queue.length; }, cancel: () => {} };
+  const video = { paused: false, currentTime: 0, srcObject: null, play: async () => {},
+                  readyState: 4, videoWidth: 1280, videoHeight: 720 };
+  const tracks = [];
+  const gum = async () => { const t = { stopped: false, stop() { this.stopped = true; } }; tracks.push(t);
+                            return { getTracks: () => [t], getVideoTracks: () => [t] }; };
+  // run all queued callbacks once (one "animation frame")
+  const tick = async () => { const cbs = queue.splice(0); for (const cb of cbs) await cb(); };
+  return { sched, video, tracks, gum, tick, queue };
+}
+
+{ const h = harness(); let frames = 0;
+  const cam = new CameraLoop(h.video, { onFrame: async () => { frames++; }, width: 1280, height: 720,
+                                        getUserMedia: h.gum, scheduler: h.sched });
+  await cam.start();
+  h.video.currentTime = 0.033; await h.tick();
+  assert('L1: new video frame → onFrame once', frames, 1);
+  await h.tick();
+  assert('L2: same currentTime → no duplicate frame', frames, 1);
+  h.video.currentTime = 0.066; await h.tick();
+  assert('L3: next video frame → 2', frames, 2);
+
+  cam.stop();
+  assert('L4: stop() stops the tracks', h.tracks[0].stopped, true);
+  h.video.currentTime = 0.1; await h.tick(); await h.tick();
+  assert('L5: no frames after stop()', frames, 2);
+  assert('L6: loop no longer scheduled after stop()', h.queue.length, 0);
+
+  // Restart: exactly ONE loop must run (camera_utils stacked a new loop per start).
+  await cam.start();
+  for (let i = 1; i <= 5; i++) { h.video.currentTime = 1 + i * 0.033; await h.tick(); }
+  assert('L7: after restart, 5 video frames → 5 onFrame (not 10)', frames, 7);
+  await cam.start();   // start while running = restart
+  for (let i = 1; i <= 3; i++) { h.video.currentTime = 2 + i * 0.033; await h.tick(); }
+  assert('L8: start() while running restarts, still one loop', frames, 10);
+  assert('L9: previous stream tracks stopped on restart', h.tracks[1].stopped, true); }
+
+{ const h = harness(); let frames = 0;
+  const cam = new CameraLoop(h.video, { onFrame: async () => { frames++; }, getUserMedia: h.gum, scheduler: h.sched });
+  await cam.start();
+  h.video.paused = true; h.video.currentTime = 0.5; await h.tick();
+  assert('P1: paused video → no frame', frames, 0); }
+
+{ const h = harness();
+  const gum = async () => { throw Object.assign(new Error('nope'), { name: 'NotAllowedError' }); };
+  const cam = new CameraLoop(h.video, { onFrame: async () => {}, getUserMedia: gum, scheduler: h.sched });
+  let err = null; try { await cam.start(); } catch (e) { err = e; }
+  assert('E1: getUserMedia error propagates (no alert)', err?.name, 'NotAllowedError');
+  assert('E2: nothing scheduled after a failed start', h.queue.length, 0); }
+
+{ const h = harness(); let calls = 0;
+  const cam = new CameraLoop(h.video, { onFrame: async () => { calls++; throw new Error('x'); },
+                                        getUserMedia: h.gum, scheduler: h.sched });
+  await cam.start();
+  h.video.currentTime = 0.1; await h.tick();
+  h.video.currentTime = 0.2; await h.tick();
+  assert('R1: a throwing onFrame does not kill the loop', calls, 2); }
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>
