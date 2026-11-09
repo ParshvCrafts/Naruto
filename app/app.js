@@ -10,7 +10,7 @@ import SignRefinement    from './modules/sign-refinement.js';
 import GestureClassifier, { mouthAspectRatio } from './modules/gesture-classifier.js';
 import CharacterSelect   from './modules/character-select.js';
 import { isReleaseSign, SpeechListener } from './modules/release-detector.js';
-import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, PERF, CAMERA, SHARINGAN, HINTS, cameraDims } from './modules/config.js';
+import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, PERF, CAMERA, SHARINGAN, HINTS, DEMO, cameraDims } from './modules/config.js';
 import { log } from './modules/log.js';
 import AppState, { Mode } from './modules/app-state.js';
 import DebugInput, { SEAL_KEYMAP } from './modules/debug-input.js';
@@ -643,6 +643,19 @@ async function init() {
   }
   btnDemo.addEventListener('click', toggleDemoMode);
 
+  // Demo mode hides the mouse cursor once it has been still for DEMO.CURSOR_HIDE_MS.
+  let cursorTimer = 0;
+  function armCursorHide() {
+    document.body.classList.remove('cursor-hidden');
+    clearTimeout(cursorTimer);
+    if (document.body.classList.contains('demo-mode')) {
+      cursorTimer = setTimeout(() => document.body.classList.add('cursor-hidden'), DEMO.CURSOR_HIDE_MS);
+    }
+  }
+  document.addEventListener('mousemove', armCursorHide);
+  btnDemo.addEventListener('click', armCursorHide);
+  document.addEventListener('keydown', e => { if (e.key === 'd' || e.key === 'D') setTimeout(armCursorHide, 0); });
+
   // ── Fullscreen API ──────────────────────────────────────────────────────────
   const btnFS = document.getElementById('btn-fullscreen');
   function toggleFullscreen() {
@@ -678,6 +691,8 @@ async function init() {
     if (e.key === 'f' || e.key === 'F') toggleFullscreen();
     // 'd' key: toggle demo mode
     if (e.key === 'd' || e.key === 'D') toggleDemoMode();
+    // 'b' key: cinematic letterbox bars (recorded with the HUD)
+    if (e.key === 'b' || e.key === 'B') log.info('app', `letterbox ${hud.toggleLetterbox() ? 'ON' : 'OFF'}`);
 
     // ── Debug input keys (§G) — all go through the SAME engine path as real detection ──
     if (Object.prototype.hasOwnProperty.call(SEAL_KEYMAP, e.key)) {

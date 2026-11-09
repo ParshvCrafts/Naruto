@@ -3,7 +3,7 @@
 // S = canvas.height / 720 so the HUD keeps the SAME relative size at any camera
 // resolution (S12/§E, fixes B16). Positions are S-scaled or fraction-of-frame.
 import { log } from './log.js';
-import { HUD as HUD_CFG, CHAKRA_DEFAULT, HINTS, CHIP } from './config.js';
+import { HUD as HUD_CFG, CHAKRA_DEFAULT, HINTS, CHIP, DEMO } from './config.js';
 
 const REF_H = HUD_CFG.REF_HEIGHT;  // reference height the raw px metrics were tuned against
 const SIGN_HYSTERESIS = HUD_CFG.SIGN_HYSTERESIS_FRAMES;  // frames before the pill switches sign
@@ -146,6 +146,14 @@ export default class HUD {
 
     // Debug strip (top-center): state name + last errors (§F)
     if (this._debug) this._drawDebugStrip(ctx, w, fps, S);
+
+    // Cinematic letterbox bars (S19, 'B'): drawn last so they frame everything.
+    if (this._letterbox) {
+      const bar = Math.max(0, (h - w / DEMO.LETTERBOX_ASPECT) / 2);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, w, bar);
+      ctx.fillRect(0, h - bar, w, bar);
+    }
   }
 
   _drawJutsuBanner(ctx, w, h, S, msg, active, pulseCond) {
@@ -494,6 +502,9 @@ export default class HUD {
 
   /** Demo mode: hide developer readouts (fps) so recordings stay clean. */
   setDemoMode(on) { this._demo = !!on; }
+
+  /** Cinematic letterbox bars on/off (S19). @returns {boolean} new state */
+  toggleLetterbox() { this._letterbox = !this._letterbox; return this._letterbox; }
 }
 
 function roundRect(ctx, x, y, w, h, r) {

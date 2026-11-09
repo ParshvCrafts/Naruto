@@ -4,6 +4,7 @@ Run: python serve.py
 Then open: http://localhost:8765/app/
 """
 import http.server
+import sys
 
 PORT = 8765
 
@@ -34,6 +35,13 @@ class Server(http.server.ThreadingHTTPServer):
     # requests (sign images, cards, video preloads) and Windows then refused some
     # with ERR_NO_BUFFER_SPACE.
     request_queue_size = 128
+
+    def handle_error(self, request, client_address):
+        # Browsers routinely drop keep-alive and video-range sockets mid-response; that is
+        # normal, so don't print a scary traceback for it.
+        if isinstance(sys.exc_info()[1], (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
 
 with Server(('', PORT), NoCacheHandler) as httpd:
     print(f'Serving at http://localhost:{PORT}/')

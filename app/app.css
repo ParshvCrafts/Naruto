@@ -196,3 +196,6 @@ body.demo-mode #demo-hint {
   pointer-events: none;
 }
 #rec-badge[hidden], body.demo-mode #rec-badge { display: none; }
+
+/* Demo mode v2 (S19): cursor hidden after a moment without movement */
+body.demo-mode.cursor-hidden, body.demo-mode.cursor-hidden * { cursor: none !important; }

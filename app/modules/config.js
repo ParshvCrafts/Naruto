@@ -254,6 +254,12 @@ export const CHIP = Object.freeze({
   PULSE_MS: 1600,
 });
 
+// ─── Demo mode v2 (S19) ───────────────────────────────────────────────────────
+export const DEMO = Object.freeze({
+  CURSOR_HIDE_MS:  2000,  // demo mode: hide the mouse cursor after this long without movement
+  LETTERBOX_ASPECT: 2.39, // 'B' toggles cinematic bars (drawn on the HUD → recorded)
+});
+
 // ─── Performance ──────────────────────────────────────────────────────────────
 export const PERF = Object.freeze({
   FPS_EMA: 0.1,   // smoothing for the fps estimate (HUD counter + 720p auto-fallback gauge)
@@ -267,6 +273,6 @@ export const HUD = Object.freeze({
 
 // Frozen aggregate for convenient default import.
 const config = Object.freeze({
-  CHAKRA, CHAKRA_DEFAULT, ENGINE, SEQUENCES, REFINE, CAROUSEL, GESTURE, RELEASE, CAMERA, HUD, PERF, AUDIO, RECORD, HINTS, CHIP,
+  CHAKRA, CHAKRA_DEFAULT, ENGINE, SEQUENCES, REFINE, CAROUSEL, GESTURE, RELEASE, CAMERA, HUD, PERF, AUDIO, RECORD, HINTS, CHIP, DEMO,
 });
 export default config;
