@@ -131,6 +131,12 @@ export const CHIDORI = Object.freeze({
   RELEASE_MS:       400,
   ARC_COUNT:        3,     // procedural lightning arcs from the palm
   ARC_REGEN_FRAMES: 3,     // regenerate arc geometry every N frames
+  ARC_LEN_FRAC:     0.16,  // arc reach = this × orb size (was 0.7: arcs crossed the whole frame)
+  ARC_WIDTH:        1.6,   // px at 720p (× S)
+  ARC_BLUR:         7,     // glow px at 720p (× S)
+  ARC_ALPHA:        0.6,
+  ARC_SEGS:         7,
+  ARC_JITTER:       0.35,  // rad of angular wobble per segment
 });
 
 // ─── Fireball VideoFX (Sasuke, S17) ───────────────────────────────────────────

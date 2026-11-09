@@ -701,15 +701,20 @@ export default class Effects {
     // Procedural lightning arcs — regenerate geometry every few frames for a crackle.
     this._arcFrame++;
     if (this._arcs.length === 0 || this._arcFrame % CHIDORI.ARC_REGEN_FRAMES === 0) {
-      this._arcs = _genArcs(a.x, a.y, size * 0.7, CHIDORI.ARC_COUNT);
+      this._arcs = _genArcs(a.x, a.y, size * CHIDORI.ARC_LEN_FRAC, CHIDORI.ARC_COUNT,
+                            CHIDORI.ARC_SEGS, CHIDORI.ARC_JITTER);
     }
+    const S = h / 720;
     ctx.save();
-    ctx.globalCompositeOperation = 'lighter';   // additive — arcs glow over the orb
+    // 'screen' (not additive 'lighter'): overlapping strokes stay chakra-coloured
+    // instead of saturating to thick white bars.
+    ctx.globalCompositeOperation = 'screen';
     ctx.strokeStyle = this._chakraColor;
     ctx.shadowColor = this._chakraColor;
-    ctx.shadowBlur  = 8;
-    ctx.lineWidth   = Math.max(1, size * 0.012);
-    ctx.globalAlpha = 0.9 * dim;
+    ctx.shadowBlur  = CHIDORI.ARC_BLUR * S;
+    ctx.lineWidth   = CHIDORI.ARC_WIDTH * S;
+    ctx.lineJoin    = 'round';
+    ctx.globalAlpha = CHIDORI.ARC_ALPHA * dim;
     for (const arc of this._arcs) {
       ctx.beginPath();
       ctx.moveTo(arc[0].x, arc[0].y);
@@ -925,17 +930,15 @@ export function shakeAt(t, cfg, S = 1, rng = Math.random, w = 1280, h = 720) {
 }
 
 /** Generate `n` jagged lightning polylines radiating from (cx,cy) out to ~len px. */
-function _genArcs(cx, cy, len, n) {
+function _genArcs(cx, cy, len, n, segs = 6, jitterRad = 0.5) {
   const arcs = [];
   for (let k = 0; k < n; k++) {
     const baseAngle = Math.random() * Math.PI * 2;
-    const segs = 5;
     const pts = [{ x: cx, y: cy }];
     let x = cx, y = cy;
     for (let i = 1; i <= segs; i++) {
       const r = (len / segs) * i;
-      const jitter = (Math.random() - 0.5) * 0.6;   // rad wobble
-      const ang = baseAngle + jitter;
+      const ang = baseAngle + (Math.random() - 0.5) * jitterRad;   // angular wobble
       x = cx + Math.cos(ang) * r + (Math.random() - 0.5) * len * 0.12;
       y = cy + Math.sin(ang) * r + (Math.random() - 0.5) * len * 0.12;
       pts.push({ x, y });
