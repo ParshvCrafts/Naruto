@@ -27,6 +27,7 @@ export default class DebugInput {
     this._signFrames   = 0;    // frames remaining for sign injection
     this._releaseFrames = 0;   // frames remaining for simulated release sign
     this._rightPalm    = false;// toggled right-open-palm sim
+    this._rightPalmUsed = false;// 'p' pressed at least once (keyboard-only session)
     this._mouthOpen    = false;// toggled mouth-open sim (S17)
   }
 
@@ -38,7 +39,7 @@ export default class DebugInput {
   /** Simulate the left release sign for RELEASE_FRAMES frames (one 'g' press). */
   pulseReleaseSign() { this._releaseFrames = RELEASE_FRAMES; }
 
-  toggleRightPalm() { this._rightPalm = !this._rightPalm; return this._rightPalm; }
+  toggleRightPalm() { this._rightPalmUsed = true; this._rightPalm = !this._rightPalm; return this._rightPalm; }
   toggleMouthOpen() { this._mouthOpen = !this._mouthOpen; return this._mouthOpen; }
 
   // ─── Per-frame consumption (called from app.js onResults) ────────────────────
@@ -62,6 +63,8 @@ export default class DebugInput {
   }
 
   isRightPalmSim() { return this._rightPalm; }
+  /** True once 'p' has been pressed this session (keyboard-only user has no tracked hand). */
+  isRightPalmSimUsed() { return !!this._rightPalmUsed; }
   isMouthOpenSim() { return this._mouthOpen; }
 
   /** Clear all simulated inputs (e.g. on jutsu reset). */

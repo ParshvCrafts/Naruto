@@ -14,6 +14,7 @@ import { CHAKRA, RELEASE, SEQUENCES, RASENGAN, CHIDORI, MOUTH, cameraDims } from
 import { log } from './modules/log.js';
 import AppState, { Mode } from './modules/app-state.js';
 import DebugInput, { SEAL_KEYMAP } from './modules/debug-input.js';
+import PalmReleaseTracker from './modules/palm-release.js';
 
 const video       = document.getElementById('video');
 const canvas      = document.getElementById('canvas');
@@ -138,10 +139,10 @@ async function init() {
   // Rasengan flow counters (S15)
   let armHoldFrames   = 0;  // left release-sign frames while IDLE+naruto → arm
   let palmOpenFrames  = 0;  // right open-palm frames while ARMED → activate
-  let palmCloseFrames = 0;  // right closed frames while active → release
+  const rasenganRelease = new PalmReleaseTracker(RASENGAN);  // closed palm / hand lost → release
   // Chidori flow counters (S16)
   let chidoriOpenFrames  = 0;  // right open-palm frames while CHIDORI_READY → activate
-  let chidoriCloseFrames = 0;  // right closed frames while chidori active → release
+  const chidoriRelease = new PalmReleaseTracker(CHIDORI);
   // Fireball flow counters (S17)
   let fireballOpenFrames  = 0;  // mouth-open frames while FIREBALL_READY → activate
   let fireballCloseFrames = 0;  // mouth-closed frames while fireball active → release
@@ -322,6 +323,9 @@ async function init() {
     // ── Rasengan flow (Naruto, S15) — engine-independent ──────────────────────────
     // Right open palm = real detector OR the 'p' debug toggle (same downstream path).
     const rightPalmOpen = gesture.isRightOpenPalm || debug.isRightPalmSim();
+    // Keyboard-only users have no tracked hand: once 'p' has been used, toggling it off
+    // counts as a present, closed palm (releases quickly) instead of a lost hand.
+    const rightPresent = gesture.rightHandPresent || debug.isRightPalmSimUsed();
 
     // Arm: IDLE + Naruto + left release sign held (no clone active). State machine
     // guarantees carousel/sequence/jutsu modes can't arm (armRasengan only from IDLE).
@@ -339,7 +343,7 @@ async function init() {
       } else if (rightPalmOpen) {
         if (++palmOpenFrames >= RASENGAN.PALM_OPEN_FRAMES) {
           state.activateRasengan(); fx.rasenganActivate();
-          palmOpenFrames = 0; palmCloseFrames = 0;
+          palmOpenFrames = 0; rasenganRelease.reset();
           hud.showActivation('Rasengan');
           log.info('app', 'RASENGAN active');
         }
@@ -350,7 +354,8 @@ async function init() {
       palmOpenFrames = 0;
     }
 
-    // Active → follow the right palm; release when the fist closes (subsumes hand-lost).
+    // Active → follow the right palm; release when the fist closes or the hand is gone
+    // for LOST_FRAMES (a brief tracking dropout keeps the orb alive at its last anchor).
     if (state.is(Mode.JUTSU_RASENGAN)) {
       const rl = results.rightHandLandmarks;
       if (rl && rl.length >= 21) {
@@ -358,14 +363,11 @@ async function init() {
       } else if (debug.isRightPalmSim()) {
         fx.setRasenganAnchor(0.5, 0.5);   // keyboard-only demo: orb at frame center
       }
-      if (rightPalmOpen) {
-        palmCloseFrames = 0;
-      } else if (++palmCloseFrames >= RASENGAN.PALM_CLOSE_FRAMES) {
-        palmCloseFrames = 0;
+      if (rasenganRelease.step(rightPresent, rightPalmOpen)) {
         releaseActiveJutsu();   // → RELEASING + fx.rasenganRelease() shrink-fade
       }
     } else {
-      palmCloseFrames = 0;
+      rasenganRelease.reset();
     }
 
     // ── Chidori flow (Sasuke, S16) — READY after the seal sequence, then right palm ──
@@ -375,7 +377,7 @@ async function init() {
       } else if (rightPalmOpen) {
         if (++chidoriOpenFrames >= CHIDORI.PALM_OPEN_FRAMES) {
           state.activateChidori(); fx.chidoriActivate();
-          chidoriOpenFrames = 0; chidoriCloseFrames = 0;
+          chidoriOpenFrames = 0; chidoriRelease.reset();
           hud.showActivation('Chidori');
           log.info('app', 'CHIDORI active');
         }
@@ -393,14 +395,9 @@ async function init() {
       } else if (debug.isRightPalmSim()) {
         fx.setChidoriAnchor(0.5, 0.5);
       }
-      if (rightPalmOpen) {
-        chidoriCloseFrames = 0;
-      } else if (++chidoriCloseFrames >= CHIDORI.PALM_CLOSE_FRAMES) {
-        chidoriCloseFrames = 0;
-        releaseActiveJutsu();
-      }
+      if (chidoriRelease.step(rightPresent, rightPalmOpen)) releaseActiveJutsu();
     } else {
-      chidoriCloseFrames = 0;
+      chidoriRelease.reset();
     }
 
     // ── Fireball flow (Sasuke, S17) — READY after the seal sequence, then MOUTH OPEN ─
@@ -526,8 +523,23 @@ async function init() {
   }
   btnFS.addEventListener('click', toggleFullscreen);
 
+  // A clicked button keeps focus, so a later Enter/Space would click it AGAIN while also
+  // driving the carousel. Drop focus after each click so keys only reach the shortcuts.
+  document.querySelector('.controls')?.addEventListener('click', e => {
+    e.target.closest?.('button')?.blur();
+  });
+
   // ── Global keyboard shortcuts ───────────────────────────────────────────────
   document.addEventListener('keydown', e => {
+    // Browser shortcuts (Ctrl+R reload, Ctrl+F find, Ctrl+D bookmark) are not ours.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // Typing/arrowing inside the chakra <select> belongs to the select.
+    if (e.target instanceof Element && e.target.closest('select, input, textarea')) return;
+    const isArrow = e.key.startsWith('Arrow');
+    if (isArrow) e.preventDefault();   // arrows drive the carousel, never scroll the page
+    // Held keys auto-repeat: that would flicker every toggle (p, m, d, f, l). Arrows may
+    // repeat (carousel paging has its own cooldown).
+    if (e.repeat && !isArrow) return;
     // 'r' key: release the ACTIVE jutsu via the same reverse-fade path as the gesture (B7)
     if (e.key === 'r' || e.key === 'R') releaseActiveJutsu();
     // 'f' key: toggle fullscreen
@@ -545,10 +557,6 @@ async function init() {
     if (e.key === 'p' || e.key === 'P') log.debug('debug', `sim right palm=${debug.toggleRightPalm()}`);
     if (e.key === 'm' || e.key === 'M') log.debug('debug', `sim mouth=${debug.toggleMouthOpen()}`);
     if (e.key === 'l' || e.key === 'L') hud.setDebugMode(log.toggleDebug(), state.mode);
-    // Prevent arrow keys from scrolling the page (handled by carousel instead)
-    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-      e.preventDefault();
-    }
     // Carousel keyboard control, gated by state (§G):
     //  - 'c' (open) forwarded only when the carousel MAY open (never mid-jutsu — B6)
     //  - arrows/Enter/e forwarded only while the carousel is already open

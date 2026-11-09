@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PalmReleaseTracker Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+  </style>
+</head>
+<body>
+<h1>PalmReleaseTracker — closed palm releases, tracking dropout tolerated</h1>
+<pre id="out">Running...</pre>
+<script type="module">
+import PalmReleaseTracker from '../modules/palm-release.js';
+
+const out = [];
+let passed = 0, failed = 0;
+function assert(desc, actual, expected) {
+  const ok = actual === expected;
+  ok ? passed++ : failed++;
+  out.push(`<span class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${desc}</span>` +
+    (ok ? '' : `\n  got: ${actual}, expected: ${expected}`));
+}
+const CFG = { PALM_CLOSE_FRAMES: 8, LOST_FRAMES: 45 };
+// Feed n frames of the same input; return the 1-based frame index that fired, or 0.
+function feed(t, n, present, open) {
+  for (let i = 1; i <= n; i++) if (t.step(present, open)) return i;
+  return 0;
+}
+
+// A: a present, closed hand releases after exactly PALM_CLOSE_FRAMES frames.
+{ const t = new PalmReleaseTracker(CFG);
+  assert('A: closed fist releases on frame 8', feed(t, 20, true, false), 8); }
+
+// B: open palm never releases.
+{ const t = new PalmReleaseTracker(CFG);
+  assert('B: open palm never releases', feed(t, 200, true, true), 0); }
+
+// C: the bug — a brief tracking dropout (hand absent 8..44 frames) must NOT release.
+{ const t = new PalmReleaseTracker(CFG);
+  assert('C: 30-frame dropout does not release', feed(t, 30, false, false), 0);
+  assert('C: hand returns open → still alive', feed(t, 5, true, true), 0); }
+
+// D: hand gone for LOST_FRAMES releases (user walked away / dropped arm).
+{ const t = new PalmReleaseTracker(CFG);
+  assert('D: absent hand releases on frame 45', feed(t, 60, false, false), 45); }
+
+// E: an open frame resets the closing count (flicker while open is tolerated).
+{ const t = new PalmReleaseTracker(CFG);
+  feed(t, 7, true, false); t.step(true, true);
+  assert('E: open frame resets close count', feed(t, 7, true, false), 0);
+  assert('E: then 8th consecutive closed frame fires', feed(t, 1, true, false), 1); }
+
+// F: dropout frames don't count as closed; closing resumes counting from 0 after a dropout.
+{ const t = new PalmReleaseTracker(CFG);
+  feed(t, 5, true, false); feed(t, 10, false, false);
+  assert('F: closed count restarts after dropout', feed(t, 7, true, false), 0);
+  assert('F: 8th closed frame after dropout fires', feed(t, 1, true, false), 1); }
+
+// G: after firing, the tracker is reset (no immediate re-fire).
+{ const t = new PalmReleaseTracker(CFG);
+  feed(t, 8, true, false);
+  assert('G: re-arms after firing', feed(t, 7, true, false), 0); }
+
+// H: reset() clears partial counts.
+{ const t = new PalmReleaseTracker(CFG);
+  feed(t, 7, true, false); t.reset();
+  assert('H: reset clears count', feed(t, 7, true, false), 0); }
+
+out.push(`\n─────\n${passed} passed, ${failed} failed`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body>
+</html>

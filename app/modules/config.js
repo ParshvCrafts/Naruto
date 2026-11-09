@@ -121,6 +121,7 @@ export const CHIDORI = Object.freeze({
   READY_TIMEOUT_MS: 10000, // READY expires to IDLE if no right palm
   PALM_OPEN_FRAMES: 5,
   PALM_CLOSE_FRAMES: 8,
+  LOST_FRAMES:      45,    // right hand tracking lost this long while active → auto-release
   LOOP_POINT:       0,     // whole clip loops
   BASE_FRAC:        0.60,
   SCALE_START:      0.8,
