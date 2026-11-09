@@ -169,7 +169,7 @@ async function startRecording() {
 
 // --- Camera + MediaPipe bootstrap ---
 const holistic = new Holistic({
-  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1675471629/${f}`
 });
 holistic.setOptions({
   modelComplexity: 1,

@@ -120,7 +120,7 @@ async function init() {
 
   // Selfie segmentation — runs independently from Holistic for cleaner API
   const segmentation = new SelfieSegmentation({
-    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${f}`
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/${f}`
   });
   segmentation.setOptions({ modelSelection: 1 });
   let latestMask = null;
@@ -473,7 +473,7 @@ async function init() {
 
   // Start MediaPipe Holistic
   const holistic = new Holistic({
-    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1675471629/${f}`
   });
   holistic.setOptions({
     modelComplexity: 1,
